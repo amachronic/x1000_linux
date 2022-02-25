@@ -47,6 +47,10 @@ config X1000_SHANLINGQ1
     bool "Shanling Q1"
     select MACH_X1000
 
+config X1000_FIIOM3K
+    bool "FiiO M3K"
+    select MACH_X1000
+
 endchoice
 
 config MACH_JZ4725B
