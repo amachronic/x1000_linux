@@ -51,6 +51,8 @@
 #define JZ_RTC_CKPCR_CK32PULL_DIS	BIT(4)
 #define JZ_RTC_CKPCR_CK32CTL_EN		(BIT(2) | BIT(1))
 
+#define RTCV 0x52544356
+
 enum jz4740_rtc_type {
 	ID_JZ4740,
 	ID_JZ4760,
@@ -145,7 +147,7 @@ static int jz4740_rtc_read_time(struct device *dev, struct rtc_time *time)
 	uint32_t secs, secs2;
 	int timeout = 5;
 
-	if (jz4740_rtc_reg_read(rtc, JZ_REG_RTC_SCRATCHPAD) != 0x12345678)
+	if (jz4740_rtc_reg_read(rtc, JZ_REG_RTC_SCRATCHPAD) != RTCV)
 		return -EINVAL;
 
 	/* If the seconds register is read while it is updated, it can contain a
@@ -177,7 +179,7 @@ static int jz4740_rtc_set_time(struct device *dev, struct rtc_time *time)
 	if (ret)
 		return ret;
 
-	return jz4740_rtc_reg_write(rtc, JZ_REG_RTC_SCRATCHPAD, 0x12345678);
+	return jz4740_rtc_reg_write(rtc, JZ_REG_RTC_SCRATCHPAD, RTCV);
 }
 
 static int jz4740_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
