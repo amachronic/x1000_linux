@@ -113,6 +113,19 @@ config PINCTRL_AT91PIO4
 	  Say Y here to enable the at91 pinctrl/gpio driver for Atmel PIO4
 	  controller available on sama5d2 SoC.
 
+config PINCTRL_AXP192
+	tristate "X-Powers AXP192 PMIC pinctrl and GPIO Support"
+	depends on MFD_AXP20X
+	select PINMUX
+	select GENERIC_PINCONF
+	select GPIOLIB
+	help
+	  AXP PMICs provide multiple GPIOs that can be muxed for different
+	  functions. This driver bundles a pinctrl driver to select the function
+	  muxing and a GPIO driver to handle the GPIO when the GPIO function is
+	  selected.
+	  Say Y to enable pinctrl and GPIO support for the AXP192 PMIC.
+
 config PINCTRL_AXP209
 	tristate "X-Powers AXP209 PMIC pinctrl and GPIO Support"
 	depends on MFD_AXP20X
