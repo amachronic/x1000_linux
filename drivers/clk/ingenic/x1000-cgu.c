@@ -4,6 +4,7 @@
  * Copyright (c) 2019 周琰杰 (Zhou Yanjie) <zhouyanjie@wanyeetech.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/io.h>
@@ -50,14 +51,13 @@
 #define USBPCR_OTG_DISABLE	BIT(20)
 
 /* bits within the USBPCR1 register */
-#define USBPCR1_REFCLKSEL_SHIFT	26
-#define USBPCR1_REFCLKSEL_MASK	(0x3 << USBPCR1_REFCLKSEL_SHIFT)
-#define USBPCR1_REFCLKSEL_CORE	(0x2 << USBPCR1_REFCLKSEL_SHIFT)
-#define USBPCR1_REFCLKDIV_SHIFT	24
-#define USBPCR1_REFCLKDIV_MASK	(0x3 << USBPCR1_REFCLKDIV_SHIFT)
-#define USBPCR1_REFCLKDIV_48	(0x2 << USBPCR1_REFCLKDIV_SHIFT)
-#define USBPCR1_REFCLKDIV_24	(0x1 << USBPCR1_REFCLKDIV_SHIFT)
-#define USBPCR1_REFCLKDIV_12	(0x0 << USBPCR1_REFCLKDIV_SHIFT)
+#define USBPCR1_REFCLKSEL	GENMASK(27, 26)
+#define USBPCR1_REFCLKSEL_CORE	0x2
+
+#define USBPCR1_REFCLKDIV	GENMASK(25, 24)
+#define USBPCR1_REFCLKDIV_48	0x2
+#define USBPCR1_REFCLKDIV_24	0x1
+#define USBPCR1_REFCLKDIV_12	0x0
 
 static struct ingenic_cgu *cgu;
 
@@ -68,7 +68,7 @@ static unsigned long x1000_otg_phy_recalc_rate(struct clk_hw *hw,
 	unsigned refclk_div;
 
 	usbpcr1 = readl(cgu->base + CGU_REG_USBPCR1);
-	refclk_div = usbpcr1 & USBPCR1_REFCLKDIV_MASK;
+	refclk_div = FIELD_GET(USBPCR1_REFCLKDIV, usbpcr1);
 
 	switch (refclk_div) {
 	case USBPCR1_REFCLKDIV_12:
@@ -122,8 +122,8 @@ static int x1000_otg_phy_set_rate(struct clk_hw *hw, unsigned long req_rate,
 	spin_lock_irqsave(&cgu->lock, flags);
 
 	usbpcr1 = readl(cgu->base + CGU_REG_USBPCR1);
-	usbpcr1 &= ~USBPCR1_REFCLKDIV_MASK;
-	usbpcr1 |= div_bits;
+	usbpcr1 &= ~USBPCR1_REFCLKDIV;
+	usbpcr1 |= FIELD_PREP(USBPCR1_REFCLKDIV, div_bits);
 	writel(usbpcr1, cgu->base + CGU_REG_USBPCR1);
 
 	spin_unlock_irqrestore(&cgu->lock, flags);
