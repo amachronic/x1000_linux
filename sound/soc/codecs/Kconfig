@@ -108,6 +108,7 @@ config SND_SOC_ALL_CODECS
 	imply SND_SOC_ES8328_I2C
 	imply SND_SOC_ES7134
 	imply SND_SOC_ES7241
+	imply SND_SOC_ESS_ES9218P
 	imply SND_SOC_GTM601
 	imply SND_SOC_HDAC_HDMI
 	imply SND_SOC_HDAC_HDA
@@ -1016,6 +1017,11 @@ config SND_SOC_ES8328_SPI
 	tristate "Everest Semi ES8328 CODEC (SPI)"
 	depends on SPI_MASTER
 	select SND_SOC_ES8328
+
+config SND_SOC_ESS_ES9218P
+	tristate "ESS Technology ES9218P CODEC"
+	depends on I2C
+	select REGMAP_I2C
 
 config SND_SOC_GTM601
 	tristate 'GTM601 UMTS modem audio codec'
