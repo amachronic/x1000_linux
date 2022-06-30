@@ -256,6 +256,9 @@ int asoc_simple_parse_clk(struct device *dev,
 	if (of_property_read_bool(node, "system-clock-direction-out"))
 		simple_dai->clk_direction = SND_SOC_CLOCK_OUT;
 
+	if (!of_property_read_u32(node, "system-clock-id", &val))
+		simple_dai->sysclk_id = val;
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(asoc_simple_parse_clk);
@@ -349,7 +352,7 @@ void asoc_simple_shutdown(struct snd_pcm_substream *substream)
 
 		if (props->mclk_fs && !dai->clk_fixed && !snd_soc_dai_active(cpu_dai))
 			snd_soc_dai_set_sysclk(cpu_dai,
-					       0, 0, SND_SOC_CLOCK_OUT);
+					       dai->sysclk_id, 0, SND_SOC_CLOCK_OUT);
 
 		asoc_simple_clk_disable(dai);
 	}
@@ -358,7 +361,7 @@ void asoc_simple_shutdown(struct snd_pcm_substream *substream)
 
 		if (props->mclk_fs && !dai->clk_fixed && !snd_soc_dai_active(codec_dai))
 			snd_soc_dai_set_sysclk(codec_dai,
-					       0, 0, SND_SOC_CLOCK_IN);
+					       dai->sysclk_id, 0, SND_SOC_CLOCK_IN);
 
 		asoc_simple_clk_disable(dai);
 	}
@@ -433,7 +436,7 @@ int asoc_simple_hw_params(struct snd_pcm_substream *substream,
 	struct asoc_simple_priv *priv = snd_soc_card_get_drvdata(rtd->card);
 	struct simple_dai_props *props = simple_priv_to_props(priv, rtd->num);
 	unsigned int mclk, mclk_fs = 0;
-	int i, ret;
+	int i, ret, sysclk_id;
 
 	if (props->mclk_fs)
 		mclk_fs = props->mclk_fs;
@@ -466,13 +469,21 @@ int asoc_simple_hw_params(struct snd_pcm_substream *substream,
 		}
 
 		for_each_rtd_codec_dais(rtd, i, sdai) {
-			ret = snd_soc_dai_set_sysclk(sdai, 0, mclk, SND_SOC_CLOCK_IN);
+			pdai = simple_props_to_dai_codec(props, i);
+			sysclk_id = pdai->sysclk_id;
+
+			ret = snd_soc_dai_set_sysclk(sdai, sysclk_id, mclk,
+						     SND_SOC_CLOCK_IN);
 			if (ret && ret != -ENOTSUPP)
 				return ret;
 		}
 
 		for_each_rtd_cpu_dais(rtd, i, sdai) {
-			ret = snd_soc_dai_set_sysclk(sdai, 0, mclk, SND_SOC_CLOCK_OUT);
+			pdai = simple_props_to_dai_cpu(props, i);
+			sysclk_id = pdai->sysclk_id;
+
+			ret = snd_soc_dai_set_sysclk(sdai, pdai->sysclk_id, mclk,
+						     SND_SOC_CLOCK_OUT);
 			if (ret && ret != -ENOTSUPP)
 				return ret;
 		}
@@ -529,7 +540,8 @@ static int asoc_simple_init_dai(struct snd_soc_dai *dai,
 		return 0;
 
 	if (simple_dai->sysclk) {
-		ret = snd_soc_dai_set_sysclk(dai, 0, simple_dai->sysclk,
+		ret = snd_soc_dai_set_sysclk(dai, simple_dai->sysclk_id,
+					     simple_dai->sysclk,
 					     simple_dai->clk_direction);
 		if (ret && ret != -ENOTSUPP) {
 			dev_err(dai->dev, "simple-card: set_sysclk error\n");
@@ -922,6 +934,7 @@ int asoc_simple_init_priv(struct asoc_simple_priv *priv,
 			dai_link[i].cpus	= &priv->dummy;
 			dai_props[i].num.cpus	=
 			dai_link[i].num_cpus	= 1;
+			dai_props[i].cpu_dai	= &priv->dummy_dai;
 		}
 
 		if (li->num[i].codecs) {
@@ -946,6 +959,7 @@ int asoc_simple_init_priv(struct asoc_simple_priv *priv,
 			dai_link[i].codecs	= &priv->dummy;
 			dai_props[i].num.codecs	=
 			dai_link[i].num_codecs	= 1;
+			dai_props[i].codec_dai	= &priv->dummy_dai;
 		}
 
 		if (li->num[i].platforms) {

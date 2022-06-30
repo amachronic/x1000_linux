@@ -26,6 +26,7 @@ struct asoc_simple_dai {
 	const char *name;
 	unsigned int sysclk;
 	int clk_direction;
+	int sysclk_id;
 	int slots;
 	int slot_width;
 	unsigned int tx_slot_mask;
@@ -67,6 +68,7 @@ struct asoc_simple_priv {
 		struct prop_nums num;
 		unsigned int mclk_fs;
 	} *dai_props;
+	struct asoc_simple_dai dummy_dai;
 	struct asoc_simple_jack hp_jack;
 	struct asoc_simple_jack mic_jack;
 	struct snd_soc_jack *aux_jacks;
