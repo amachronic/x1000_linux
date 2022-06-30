@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2022 Aidan MacDonald
+ * Copyright (c) 2022 Aidan MacDonald <aidanmacdonald.0x0@gmail.com>
  */
 
 #include <linux/bitfield.h>
@@ -44,6 +44,10 @@
 #define AK4376A_DAC_ADJUST1	0x26
 #define AK4376A_DAC_ADJUST2	0x2a
 
+#define AK4376A_PLL_CLK_SRC_PLS		GENMASK(1, 0)
+
+#define AK4376A_AUDIO_IF_FMT_BCKO	BIT(3)
+
 enum ak4376a_supply_id {
 	AK4376A_SUPPLY_AVDD,
 	AK4376A_SUPPLY_CVDD,
@@ -65,10 +69,133 @@ struct ak4376a_priv {
 	struct gpio_desc *pdn_gpio;
 };
 
+static int ak4376a_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
+{
+	struct snd_soc_component *component = dai->component;
+}
+
+static int ak4376a_hw_params(struct snd_pcm_substream *substream,
+			     struct snd_pcm_hw_params *params,
+			     struct snd_soc_dai *dai)
+{
+	struct snd_soc_component *component = dai->component;
+}
+
+static int ak4376a_calc_pll(unsigned int freq_in, unsigned int freq_out,
+			    unsigned int *pll_d, unsigned int *pll_m, unsigned int *mdiv)
+{
+	unsigned int d, d_min, d_max;
+	unsigned long m, div;
+	u64 freq, err, best_err = U64_MAX;
+	int ret = -EINVAL;
+
+	if (freq_out == 0) {
+		*pll_d = 0;
+		*pll_m = 0;
+		*mdiv = 0;
+		return 0;
+	}
+
+	d_max = freq_in / 256000;
+	d_min = freq_in / 3072000;
+	if (d_min < 1)
+		d_min = 1;
+	
+	for (d = d_min; d <= d_max; ++d) {
+		rational_best_approximation(freq_in/d, freq_out, 0x10000, 0x100, &m, &div);
+		if (m <= 1) {
+			if (m == 0 || div > 0x80)
+				continue;
+
+			m++;
+			div *= 2;
+		}
+
+		freq = div_u64((u64)(freq_in/d) * m, div);
+		err = freq - (u64)freq_out;
+
+		if (err <= best_err) {
+			*pll_d = d - 1;
+			*pll_m = m - 1;
+			*mdiv = div;
+			best_err = err;
+			ret = 0;
+
+			if (err == 0)
+				break;
+		}
+	}
+
+	return ret;
+}
+
+static int ak4376a_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
+			   unsigned int freq_in, unsigned int freq_out)
+{
+	struct snd_soc_component *component = dai->component;
+	unsigned int pll_d, pll_m, mdiv;
+	int ret;
+
+	if (pll_id != 0)
+		return -EINVAL;
+
+	ret = ak4376a_calc_pll(freq_in, freq_out, &pll_d, &pll_m, &mdiv);
+	if (ret)
+		return ret;
+
+	switch (source) {
+	case AK4376A_PLL_SRC_MCKI:
+	case AK4376A_PLL_SRC_BCLK:
+	case AK4376A_PLL_SRC_XTAL:
+		snd_soc_component_write_bits(component, AK4376A_PLL_CLK_SRC,
+					     AK4376A_PLL_CLK_SRC_PLS, source);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	snd_soc_component_write(component, AK4376A_PLL_REFCLKDIV1, pll_d >> 8);
+	snd_soc_component_write(component, AK4376A_PLL_REFCLKDIV2, pll_d & 0xff);
+	snd_soc_component_write(component, AK4376A_PLL_FBCLKDIV1, pll_m >> 8);
+	snd_soc_component_write(component, AK4376A_PLL_FBCLKDIV2, pll_m & 0xff);
+	snd_soc_component_write(component, AK4376A_DAC_CLK_DIV, mdiv);
+	return 0;
+}
+
+static int ak4376a_set_sysclk(struct snd_soc_dai *cpu_dai, int clk_id,
+			      unsigned int freq, int dir)
+{
+	struct snd_soc_component *component = dai->component;
+
+	switch (clk_id) {
+	}
+}
+
+static int ak4376a_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
+{
+	struct snd_soc_component *component = dai->component;
+
+	switch (ratio) {
+	case 32:
+		snd_soc_component_write_bits(component, AK4376A_AUDIO_IF_FMT,
+					      AK4376A_AUDIO_IF_FMT_BCKO, 1);
+		break;
+	case 64:
+		snd_soc_component_write_bits(component, AK4376A_AUDIO_IF_FMT,
+					      AK4376A_AUDIO_IF_FMT_BCKO, 0);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static const struct snd_soc_dai_ops ak4376a_dai_ops = {
-	.set_fmt = es9218p_set_fmt,
-	.hw_params = es9218p_hw_params,
-	.mute_stream = es9218p_mute_stream,
+	.set_fmt = ak4376a_set_fmt,
+	.hw_params = ak4376a_hw_params,
+	.set_sysclk = ak4376a_set_sysclk,
+	.set_bclk_ratio = ak4376a_set_bclk_ratio,
 };
 
 static struct snd_soc_dai_driver ak4376a_dai = {
