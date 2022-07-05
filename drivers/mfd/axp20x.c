@@ -203,6 +203,12 @@ static const struct resource axp152_pek_resources[] = {
 	DEFINE_RES_IRQ_NAMED(AXP152_IRQ_PEK_FAL_EDGE, "PEK_DBF"),
 };
 
+static const struct resource axp192_gpio_resources[] = {
+	DEFINE_RES_IRQ_NAMED(AXP192_IRQ_GPIO0_INPUT, "GPIO0"),
+	DEFINE_RES_IRQ_NAMED(AXP192_IRQ_GPIO1_INPUT, "GPIO1"),
+	DEFINE_RES_IRQ_NAMED(AXP192_IRQ_GPIO2_INPUT, "GPIO2"),
+};
+
 static const struct resource axp192_ac_power_supply_resources[] = {
 	DEFINE_RES_IRQ_NAMED(AXP192_IRQ_ACIN_PLUGIN, "ACIN_PLUGIN"),
 	DEFINE_RES_IRQ_NAMED(AXP192_IRQ_ACIN_REMOVAL, "ACIN_REMOVAL"),
@@ -704,6 +710,11 @@ static const struct regmap_irq_chip axp809_regmap_irq_chip = {
 
 static const struct mfd_cell axp192_cells[] = {
 	{
+		.name		= "axp192-gpio",
+		.of_compatible	= "x-powers,axp192-gpio",
+		.num_resources	= ARRAY_SIZE(axp192_gpio_resources),
+		.resources	= axp192_gpio_resources,
+	}, {
 		.name		= "axp192-adc",
 		.of_compatible	= "x-powers,axp192-adc",
 	}, {
