@@ -100,7 +100,7 @@ static int ak4376a_calc_pll(unsigned int freq_in, unsigned int freq_out,
 	d_min = freq_in / 3072000;
 	if (d_min < 1)
 		d_min = 1;
-	
+
 	for (d = d_min; d <= d_max; ++d) {
 		rational_best_approximation(freq_in/d, freq_out, 0x10000, 0x100, &m, &div);
 		if (m <= 1) {
@@ -257,21 +257,21 @@ static int ak4376a_set_bias_level(struct snd_soc_component *component,
 {
 	struct ak4376a_priv *priv = snd_soc_component_get_drvdata(component);
 	int ret = 0;
-	
+
 	switch (level) {
 	case SND_SOC_BIAS_ON:
 		break;
-		
+
 	case SND_SOC_BIAS_PREPARE:
 		break;
-		
+
 	case SND_SOC_BIAS_STANDBY:
 		break;
 
 	case SND_SOC_BIAS_OFF:
 		break;
 	}
-	
+
 	return ret;
 }
 
