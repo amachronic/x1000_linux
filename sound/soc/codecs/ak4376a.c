@@ -44,7 +44,12 @@
 #define AK4376A_DAC_ADJUST1	0x26
 #define AK4376A_DAC_ADJUST2	0x2a
 
+#define AK4376A_CLOCK_MODE_FS		GENMASK(4, 0)
+#define AK4376A_CLOCK_MODE_CM		GENMASK(6, 5)
+
 #define AK4376A_PLL_CLK_SRC_PLS		GENMASK(1, 0)
+
+#define AK4376A_DAC_CLK_SRC_CKS		GENMASK(1, 0)
 
 #define AK4376A_AUDIO_IF_FMT_BCKO	BIT(3)
 
@@ -67,7 +72,29 @@ struct ak4376a_priv {
 	struct regmap *regmap;
 	struct regulator_bulk_data supplies[AK4376A_NUM_SUPPLIES];
 	struct gpio_desc *pdn_gpio;
+
+	unsigned int dac_clk_freq;
 };
+
+static const unsigned int ak4376a_rates[] = {
+	8000, 11025, 12000, 16000, 22050, 24000,
+	32000, 44100, 48000, 64000, 88200, 96000,
+	128000, 176400, 192000, 256000, 352800, 384000,
+};
+
+static const struct snd_pcm_hw_constraint_list ak4376a_rate_constraints = {
+	.count = ARRAY_SIZE(ak4376a_rates),
+	.list = ak4376a_rates,
+};
+
+static int ak4376a_startup(struct snd_pcm_substream *substream,
+			   struct snd_soc_dai *dai)
+{
+	snd_pcm_hw_constraint_list(substream->runtime, 0,
+				   SNDRV_PCM_HW_PARAM_RATE,
+				   &ak4376a_rate_constraints);
+	return 0;
+}
 
 static int ak4376a_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 {
@@ -79,6 +106,33 @@ static int ak4376a_hw_params(struct snd_pcm_substream *substream,
 			     struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
+	unsigned int fs, cm;
+
+	switch (params_rate(params)) {
+	case 8000:	fs = 0; break;
+	case 11025:	fs = 1; break;
+	case 12000:	fs = 2; break;
+	case 16000:	fs = 4; break;
+	case 22050:	fs = 5; break;
+	case 24000:	fs = 6; break;
+	case 32000:	fs = 8; break;
+	case 44100:	fs = 9; break;
+	case 48000:	fs = 10; break;
+	case 64000:	fs = 12; break;
+	case 88200:	fs = 13; break;
+	case 96000:	fs = 14; break;
+	case 128000:	fs = 16; break;
+	case 176400:	fs = 17; break;
+	case 192000:	fs = 18; break;
+	case 256000:	fs = 20; break;
+	case 352800:	fs = 21; break;
+	case 384000:	fs = 22; break;
+	default:	return -EINVAL;
+	}
+
+	snd_soc_component_write_bits(component, AK4376A_CLOCK_MODE,
+				     AK4376A_CLOCK_MODE_FS, fs);
+	return 0;
 }
 
 static int ak4376a_calc_pll(unsigned int freq_in, unsigned int freq_out,
@@ -159,6 +213,9 @@ static int ak4376a_set_pll(struct snd_soc_dai *dai, int pll_id, int source,
 	snd_soc_component_write(component, AK4376A_PLL_FBCLKDIV1, pll_m >> 8);
 	snd_soc_component_write(component, AK4376A_PLL_FBCLKDIV2, pll_m & 0xff);
 	snd_soc_component_write(component, AK4376A_DAC_CLK_DIV, mdiv);
+
+	/* FIXME: update dac_clk_freq? */
+
 	return 0;
 }
 
@@ -166,9 +223,22 @@ static int ak4376a_set_sysclk(struct snd_soc_dai *cpu_dai, int clk_id,
 			      unsigned int freq, int dir)
 {
 	struct snd_soc_component *component = dai->component;
+	struct ak4376a_priv *priv = snd_soc_component_get_drvdata(component);
 
 	switch (clk_id) {
+	case AK4376A_CLK_MCKI:
+	case AK4376A_CLK_PLLCLK:
+	case AK4376A_CLK_XTAL:
+		snd_soc_component_write_bits(component, AK4376A_DAC_CLK_SRC,
+					     AK4376A_DAC_CLK_SRC_CKS, clk_id);
+		break;
+
+	default:
+		return -EINVAL;
 	}
+
+	priv->dac_clk_freq = freq;
+	return 0;
 }
 
 static int ak4376a_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
@@ -192,8 +262,10 @@ static int ak4376a_set_bclk_ratio(struct snd_soc_dai *dai, unsigned int ratio)
 }
 
 static const struct snd_soc_dai_ops ak4376a_dai_ops = {
+	.startup = ak4376a_startup,
 	.set_fmt = ak4376a_set_fmt,
 	.hw_params = ak4376a_hw_params,
+	.set_pll = ak4376a_set_pll,
 	.set_sysclk = ak4376a_set_sysclk,
 	.set_bclk_ratio = ak4376a_set_bclk_ratio,
 };
@@ -204,7 +276,14 @@ static struct snd_soc_dai_driver ak4376a_dai = {
 		.stream_name = "Playback",
 		.channels_min = 2,
 		.channels_max = 2,
-		.rates = SNDRV_PCM_RATE_CONTINUOUS,
+		.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_11025 |
+			 SNDRV_PCM_RATE_16000 | SNDRV_PCM_RATE_22050 |
+			 SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_44100 |
+			 SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_64000 |
+			 SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000 |
+			 SNDRV_PCM_RATE_176400 | SNDRV_PCM_RATE_192000 |
+			 SNDRV_PCM_RATE_352800 | SNDRV_PCM_RATE_384000 |
+			 SNDRV_PCM_RATE_KNOT,
 		.rate_min = 8000,
 		.rate_max = 384000,
 		.formats = SNDRV_PCM_FMTBIT_S16_LE |
