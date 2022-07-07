@@ -414,6 +414,74 @@ static const struct i2s_soc_info jz4780_i2s_soc_info = {
 	.field_i2sdiv_playback	= REG_FIELD(JZ_REG_AIC_CLK_DIV, 0, 3),
 };
 
+static const struct snd_soc_dapm_widget jz4740_i2s_dapm_widgets[] = {
+	SND_SOC_DAPM_AIF_IN("AIC_RX", "Playback", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("AIC_TX", "Capture", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("I2S_EXT_TX", NULL, 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("I2S_EXT_RX", NULL, 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_OUT("I2S_INT_TX", NULL, 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("I2S_INT_RX", NULL, 0, SND_SOC_NOPM, 0, 0),
+};
+
+static const struct snd_soc_dapm_route jz4740_i2s_ext_codec_routes[] = {
+	{"I2S_EXT_TX", NULL, "AIC_RX"},
+	{"AIC_TX", NULL, "I2S_EXT_RX"},
+};
+
+static const struct snd_soc_dapm_route jz4740_i2s_int_codec_routes[] = {
+	{"I2S_INT_TX", NULL, "AIC_RX"},
+	{"AIC_TX", NULL, "I2S_INT_RX"},
+};
+
+static int jz4740_i2s_codec_mux_get(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	unsigned int value = snd_soc_component_read_field(component, JZ_REG_AIC_CONF,
+							  JZ_AIC_CONF_INTERNAL_CODEC);
+
+	ucontrol->value.enumerated.item[0] = value;
+	return 0;
+}
+
+static int jz4740_i2s_codec_mux_put(struct snd_kcontrol *kcontrol,
+				    struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	unsigned int value = ucontrol->value.enumerated.item[0];
+	int ret;
+
+	ret = snd_soc_component_write_field(component, JZ_REG_AIC_CONF,
+					    JZ_AIC_CONF_INTERNAL_CODEC, value);
+	if (!ret)
+		return 0;
+
+	if (value) {
+		snd_soc_dapm_del_routes(dapm, jz4740_i2s_ext_codec_routes,
+					ARRAY_SIZE(jz4740_i2s_ext_codec_routes));
+		snd_soc_dapm_add_routes(dapm, jz4740_i2s_int_codec_routes,
+					ARRAY_SIZE(jz4740_i2s_int_codec_routes));
+	} else {
+		snd_soc_dapm_del_routes(dapm, jz4740_i2s_int_codec_routes,
+					ARRAY_SIZE(jz4740_i2s_int_codec_routes));
+		snd_soc_dapm_add_routes(dapm, jz4740_i2s_ext_codec_routes,
+					ARRAY_SIZE(jz4740_i2s_ext_codec_routes));
+	}
+
+	snd_soc_dapm_sync(dapm);
+	snd_soc_dpcm_runtime_update(dapm->card);
+	return 1;
+}
+
+static const char * const codec_mux_texts[] = { "External", "Internal" };
+static SOC_ENUM_SINGLE_EXT_DECL(codec_mux_enum, codec_mux_texts);
+
+static const struct snd_kcontrol_new jz4740_i2s_controls[] = {
+	SOC_ENUM_EXT("Codec Mux", codec_mux_enum,
+		     jz4740_i2s_codec_mux_get, jz4740_i2s_codec_mux_put),
+};
+
 static int jz4740_i2s_suspend(struct snd_soc_component *component)
 {
 	struct jz4740_i2s *i2s = snd_soc_component_get_drvdata(component);
@@ -453,6 +521,7 @@ static int jz4740_i2s_resume(struct snd_soc_component *component)
 static int jz4740_i2s_probe(struct snd_soc_component *component)
 {
 	struct jz4740_i2s *i2s = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
 	u32 codec_bits;
 	int ret;
 
@@ -463,8 +532,14 @@ static int jz4740_i2s_probe(struct snd_soc_component *component)
 	}
 
 	if ((codec_bits & INGENIC_AIC_INTERNAL_CODEC_BIT) &&
-	    (codec_bits & INGENIC_AIC_EXTERNAL_CODEC_BIT))
-		dev_warn(component->dev, "Dual codec configuration is unsupported, ignoring external codec\n");
+	    (codec_bits & INGENIC_AIC_EXTERNAL_CODEC_BIT)) {
+		snd_soc_dapm_new_controls(dapm, jz4740_i2s_dapm_widgets,
+					  ARRAY_SIZE(jz4740_i2s_dapm_widgets));
+		snd_soc_dapm_add_routes(dapm, jz4740_i2s_int_codec_routes,
+					ARRAY_SIZE(jz4740_i2s_int_codec_routes));
+		snd_soc_add_component_controls(component, jz4740_i2s_controls,
+					       ARRAY_SIZE(jz4740_i2s_controls));
+	}
 
 	ret = clk_prepare_enable(i2s->clk_aic);
 	if (ret)
