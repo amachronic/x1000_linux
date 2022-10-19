@@ -3,6 +3,8 @@
  *  Copyright (C) 2010, Lars-Peter Clausen <lars@metafoo.de>
  */
 
+#include <dt-bindings/sound/ingenic,aic.h>
+
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -459,7 +461,18 @@ static int jz4740_i2s_resume(struct snd_soc_component *component)
 static int jz4740_i2s_probe(struct snd_soc_component *component)
 {
 	struct jz4740_i2s *i2s = snd_soc_component_get_drvdata(component);
+	u32 codec_bits;
 	int ret;
+
+	ret = device_property_read_u32(component->dev, "ingenic,codecs", &codec_bits);
+	if (ret) {
+		dev_warn(component->dev, "Missing codec configuration, defaulting to internal codec\n");
+		codec_bits = INGENIC_AIC_INTERNAL_CODEC_BIT;
+	}
+
+	if ((codec_bits & INGENIC_AIC_INTERNAL_CODEC_BIT) &&
+	    (codec_bits & INGENIC_AIC_EXTERNAL_CODEC_BIT))
+		dev_warn(component->dev, "Dual codec configuration is unsupported, ignoring external codec\n");
 
 	ret = clk_prepare_enable(i2s->clk_aic);
 	if (ret)
@@ -468,8 +481,9 @@ static int jz4740_i2s_probe(struct snd_soc_component *component)
 	regmap_write(i2s->regmap, JZ_REG_AIC_CONF, JZ_AIC_CONF_RESET);
 
 	regmap_write(i2s->regmap, JZ_REG_AIC_CONF,
-		     JZ_AIC_CONF_OVERFLOW_PLAY_LAST |
-		     JZ_AIC_CONF_I2S | JZ_AIC_CONF_INTERNAL_CODEC);
+		     JZ_AIC_CONF_OVERFLOW_PLAY_LAST | JZ_AIC_CONF_I2S);
+	if (codec_bits & INGENIC_AIC_INTERNAL_CODEC_BIT)
+		regmap_set_bits(i2s->regmap, JZ_REG_AIC_CONF, JZ_AIC_CONF_INTERNAL_CODEC);
 
 	regmap_field_write(i2s->field_rx_fifo_thresh, 7);
 	regmap_field_write(i2s->field_tx_fifo_thresh, 8);
