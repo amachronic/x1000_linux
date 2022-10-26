@@ -11,6 +11,13 @@
 		#io-channel-cells = <1>;
 	};
 
+	axp_gpio: gpio {
+		compatible = "x-powers,axp192-gpio";
+		gpio-controller;
+		#gpio-cells = <2>;
+		gpio-ranges = <&axp_gpio 0 0 6>;
+	};
+
 	ac_power_supply: ac-power {
 		compatible = "x-powers,axp202-ac-power-supply";
 	};
