@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: GPL-2.0
+
+&axp192 {
+	compatible = "x-powers,axp192";
+
+	interrupt-controller;
+	#interrupt-cells = <1>;
+
+	axp_adc: adc {
+		compatible = "x-powers,axp192-adc";
+		#io-channel-cells = <1>;
+	};
+
+	ac_power_supply: ac-power {
+		compatible = "x-powers,axp202-ac-power-supply";
+	};
+
+	usb_power_supply: usb-power {
+		compatible = "x-powers,axp192-usb-power-supply";
+	};
+
+	battery_power_supply: battery-power {
+		compatible = "x-powers,axp192-battery-power-supply";
+	};
+
+	regulators {
+		x-powers,dcdc-freq = <1500>;
+
+		reg_dcdc1: dcdc1 {
+			regulator-name = "dcdc1";
+		};
+
+		reg_dcdc2: dcdc2 {
+			regulator-name = "dcdc2";
+		};
+
+		reg_dcdc3: dcdc3 {
+			regulator-name = "dcdc3";
+		};
+
+		reg_ldo1: ldo1 {
+			/* LDO1 is a fixed output and cannot be disabled */
+			regulator-always-on;
+			regulator-name = "ldo1";
+		};
+
+		reg_ldo2: ldo2 {
+			regulator-name = "ldo2";
+		};
+
+		reg_ldo3: ldo3 {
+			regulator-name = "ldo3";
+		};
+
+		reg_ldo_io0: ldo-io0 {
+			regulator-name = "ldo_io0";
+			status = "disabled";
+		};
+	};
+};
