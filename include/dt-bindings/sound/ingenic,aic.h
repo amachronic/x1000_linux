@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#ifndef __DT_BINDINGS_INGENIC_AIC_H__
+#define __DT_BINDINGS_INGENIC_AIC_H__
+
+#define INGENIC_AIC_INTERNAL_CODEC_BIT	0x01
+#define INGENIC_AIC_EXTERNAL_CODEC_BIT	0x02
+
+#endif /* __DT_BINDINGS_INGENIC_AIC_H__ */

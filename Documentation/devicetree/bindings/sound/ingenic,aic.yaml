@@ -65,6 +65,28 @@ required:
   - dma-names
   - '#sound-dai-cells'
 
+patternProperties:
+  ingenic,codecs:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [1, 2, 3]
+    description:
+      Bitmask describing which codec paths are valid. Macros specifying
+      the codec bits can be found in <dt-bindings/sound/ingenic,aic.h>.
+      Only two codec paths exist:
+
+      * INGENIC_AIC_INTERNAL_CODEC_BIT (SoC internal codec)
+      * INGENIC_AIC_EXTERNAL_CODEC_BIT (an external discrete codec)
+
+      If the bit corresponding to a codec path is set, then that codec
+      path can be used for audio playback or capture. The path actually
+      used for playback or capture may be selected at runtime from the
+      paths permitted by the DT.
+
+  additionalProperties: false
+
+  required:
+    - ingenic,codecs
+
 examples:
   - |
     #include <dt-bindings/clock/ingenic,jz4740-cgu.h>
@@ -83,4 +105,6 @@ examples:
 
       dmas = <&dmac 25 0xffffffff>, <&dmac 24 0xffffffff>;
       dma-names = "rx", "tx";
+
+      ingenic,codecs = <INGENIC_AIC_INTERNAL_CODEC_BIT>;
     };
