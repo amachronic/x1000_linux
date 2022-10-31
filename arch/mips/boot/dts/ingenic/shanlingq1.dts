@@ -6,6 +6,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/clock/ingenic,sysost.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/sound/ingenic,aic.h>
 
 / {
 	compatible = "shanling,q1", "ingenic,x1000e";
@@ -103,6 +104,37 @@
 		linux,axis = <REL_WHEEL>;
 		rotary-encoder,relative-axis;
 	};
+
+	sound {
+		compatible = "simple-scu-audio-card";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		simple-audio-card,name = "Shanling Q1 Audio";
+		simple-audio-card,widgets = "Headphones", "Headphones";
+		simple-audio-card,routing =
+			"Headphones", "ES9218P OUTL",
+			"Headphones", "ES9218P OUTR",
+			"ES9218P Playback", "Playback";
+
+		simple-audio-card,dai-link@0 {
+			reg = <0>;
+
+			format = "i2s";
+			convert-sample-format = "s32_le";
+			bitclock-master = <&link0_codec>;
+			frame-master = <&link0_codec>;
+
+			link0_cpu: cpu {
+				sound-dai = <&aic>;
+			};
+
+			link0_codec: codec {
+				prefix = "ES9218P";
+				sound-dai = <&es9218p>;
+			};
+		};
+	};
 };
 
 &exclk {
@@ -199,6 +231,26 @@
 
 	pinctrl-names = "default";
 	pinctrl-0 = <&pins_i2c1>;
+
+	es9218p: codec@48 {
+		compatible = "ess,es9218p";
+		reg = <0x48>;
+
+		#sound-dai-cells = <0>;
+
+		reset-gpio = <&gpd 5 GPIO_ACTIVE_HIGH>;
+
+		avdd-supply = <&es9218p_en_reg>;
+		vcca-supply = <&es9218p_en_reg>;
+		avcc3v3-supply = <&es9218p_en_reg>;
+		avcc1v8-supply = <&es9218p_en_reg>;
+
+		clock-names = "mclk";
+		clocks = <&es9218p_xi_clk>;
+
+		ess,max-clock-div = <4>;
+		ess,oscillator-pad-bias = <0>;
+	};
 };
 
 &i2c2 {
@@ -272,7 +324,21 @@
 	status = "okay";
 };
 
+&aic {
+	status = "okay";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&pins_aic>;
+
+	ingenic,codecs = <INGENIC_AIC_EXTERNAL_CODEC_BIT>;
+};
+
 &pinctrl {
+	pins_aic: aic {
+		function = "i2s";
+		groups = "i2s-clk-txrx", "i2s-data-tx";
+	};
+
 	pins_axp192: axp192 {
 		/* pullup required on interrupt line */
 		pins = "PC21";
