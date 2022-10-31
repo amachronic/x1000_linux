@@ -116,6 +116,7 @@
 			"Headphones", "ES9218P OUTL",
 			"Headphones", "ES9218P OUTR",
 			"ES9218P Playback", "Playback";
+		simple-audio-card,hp-det-gpio = <&axp_gpio 1 GPIO_ACTIVE_HIGH>;
 
 		simple-audio-card,dai-link@0 {
 			reg = <0>;
