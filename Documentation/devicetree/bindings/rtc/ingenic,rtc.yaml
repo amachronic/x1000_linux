@@ -75,12 +75,22 @@ properties:
       Minimum wakeup pin assertion time
       (assuming RTC clock at 32 kHz)
 
+  ingenic,rtc-valid-value:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Value compared against the RTC scratchpad register to detect
+      if a power loss has occurred since the RTC was last set. If
+      the register doesn't contain this value, the RTC setting is
+      assumed to be invalid. Setting the RTC writes this value to
+      the scratchpad register.
+
 required:
   - compatible
   - reg
   - interrupts
   - clocks
   - clock-names
+  - ingenic,rtc-valid-value
 
 unevaluatedProperties: false
 
