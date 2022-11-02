@@ -53,6 +53,7 @@ enum jz4740_rtc_type {
 struct jz4740_rtc {
 	void __iomem *base;
 	enum jz4740_rtc_type type;
+	u32 rtc_valid;
 
 	struct rtc_device *rtc;
 
@@ -143,7 +144,7 @@ static int jz4740_rtc_read_time(struct device *dev, struct rtc_time *time)
 	uint32_t secs, secs2;
 	int timeout = 5;
 
-	if (jz4740_rtc_reg_read(rtc, JZ_REG_RTC_SCRATCHPAD) != 0x12345678)
+	if (jz4740_rtc_reg_read(rtc, JZ_REG_RTC_SCRATCHPAD) != rtc->rtc_valid)
 		return -EINVAL;
 
 	/* If the seconds register is read while it is updated, it can contain a
@@ -175,7 +176,7 @@ static int jz4740_rtc_set_time(struct device *dev, struct rtc_time *time)
 	if (ret)
 		return ret;
 
-	return jz4740_rtc_reg_write(rtc, JZ_REG_RTC_SCRATCHPAD, 0x12345678);
+	return jz4740_rtc_reg_write(rtc, JZ_REG_RTC_SCRATCHPAD, rtc->rtc_valid);
 }
 
 static int jz4740_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
@@ -368,6 +369,9 @@ static int jz4740_rtc_probe(struct platform_device *pdev)
 
 	rtc->rtc->ops = &jz4740_rtc_ops;
 	rtc->rtc->range_max = U32_MAX;
+
+	if(of_property_read_u32(np, "ingenic,rtc-valid-value", &rtc->rtc_valid))
+		rtc->rtc_valid = 0x12345678;
 
 	rate = clk_get_rate(clk);
 	jz4740_rtc_set_wakeup_params(rtc, np, rate);
