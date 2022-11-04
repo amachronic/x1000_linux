@@ -172,6 +172,16 @@
 
 	pinctrl-names = "default";
 	pinctrl-0 = <&pins_i2c2>;
+
+	axp192: pmic@34 {
+		reg = <0x34>;
+
+		interrupt-parent = <&gpb>;
+		interrupts = <10 IRQ_TYPE_LEVEL_LOW>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&pins_axp192>;
+	};
 };
 
 &msc0 {
@@ -196,6 +206,12 @@
 };
 
 &pinctrl {
+	pins_axp192: axp192 {
+		/* pullup required on interrupt line */
+		pins = "PB10";
+		bias-pull-up;
+	};
+
 	pins_i2c0: i2c0 {
 		function = "i2c0";
 		groups = "i2c0-data";
@@ -229,4 +245,34 @@
 		function = "pwm4";
 		groups = "pwm4";
 	};
+};
+
+#include <arm/axp192.dtsi>
+
+&battery_power_supply {
+	monitored-battery = <&battery>;
+};
+
+/*
+ * For now, turn on all regulators.
+ */
+
+&reg_dcdc1 {
+	regulator-always-on;
+};
+
+&reg_dcdc2 {
+	regulator-always-on;
+};
+
+&reg_dcdc3 {
+	regulator-always-on;
+};
+
+&reg_ldo2 {
+	regulator-always-on;
+};
+
+&reg_ldo3 {
+	regulator-always-on;
 };
