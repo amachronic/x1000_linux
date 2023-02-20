@@ -422,7 +422,7 @@ static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 		}
 
 		if (cfg == 0xff) {
-			dev_err(axp20x->dev, "unsupported ramp value %d", ramp);
+			dev_err(&rdev->dev, "unsupported ramp value %d", ramp);
 			return -EINVAL;
 		}
 
