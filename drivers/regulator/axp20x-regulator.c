@@ -360,6 +360,10 @@
 		.ops		= &axp20x_ops_range,				\
 	}
 
+struct axp20x_regulator_priv {
+	enum axp20x_variants variant;
+};
+
 static const int axp209_dcdc2_ldo3_slew_rates[] = {
 	1600,
 	 800,
@@ -367,13 +371,14 @@ static const int axp209_dcdc2_ldo3_slew_rates[] = {
 
 static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 {
-	struct axp20x_dev *axp20x = rdev_get_drvdata(rdev);
+	struct axp20x_regulator_priv *priv = rdev_get_drvdata(rdev);
+
 	int id = rdev_get_id(rdev);
 	u8 reg, mask, enable, cfg = 0xff;
 	const int *slew_rates;
 	int rate_count = 0;
 
-	switch (axp20x->variant) {
+	switch (priv->variant) {
 	case AXP209_ID:
 		if (id == AXP20X_DCDC2) {
 			slew_rates = axp209_dcdc2_ldo3_slew_rates;
@@ -429,15 +434,15 @@ static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 		cfg |= enable;
 	}
 
-	return regmap_update_bits(axp20x->regmap, reg, mask, cfg);
+	return regmap_update_bits(rdev->regmap, reg, mask, cfg);
 }
 
 static int axp20x_regulator_enable_regmap(struct regulator_dev *rdev)
 {
-	struct axp20x_dev *axp20x = rdev_get_drvdata(rdev);
+	struct axp20x_regulator_priv *priv = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
 
-	switch (axp20x->variant) {
+	switch (priv->variant) {
 	case AXP209_ID:
 		if ((id == AXP20X_LDO3) &&
 		    rdev->constraints && rdev->constraints->soft_start) {
@@ -1095,11 +1100,11 @@ static int axp20x_regulator_parse_dt(struct platform_device *pdev)
 
 static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
 {
-	struct axp20x_dev *axp20x = rdev_get_drvdata(rdev);
+	struct axp20x_regulator_priv *priv = rdev_get_drvdata(rdev);
 	unsigned int reg = AXP20X_DCDC_MODE;
 	unsigned int mask;
 
-	switch (axp20x->variant) {
+	switch (priv->variant) {
 	case AXP202_ID:
 	case AXP209_ID:
 		if ((id != AXP20X_DCDC2) && (id != AXP20X_DCDC3))
@@ -1211,13 +1216,19 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	struct regulator_config config = {
 		.dev = pdev->dev.parent,
 		.regmap = axp20x->regmap,
-		.driver_data = axp20x,
 	};
 	int ret, i, nregulators;
 	u32 workmode;
 	const char *dcdc1_name = axp22x_regulators[AXP22X_DCDC1].name;
 	const char *dcdc5_name = axp22x_regulators[AXP22X_DCDC5].name;
 	bool drivevbus = false;
+
+	struct axp20x_regulator_priv *priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	priv->variant = axp20x->variant;
+	config.driver_data = priv;
 
 	switch (axp20x->variant) {
 	case AXP202_ID:
