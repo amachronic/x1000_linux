@@ -581,7 +581,7 @@ static const struct regmap_irq_chip axp809_regmap_irq_chip = {
 	.num_regs		= 5,
 };
 
-static const struct mfd_cell axp20x_cells[] = {
+static const struct mfd_cell axp202_cells[] = {
 	{
 		.name		= "axp20x-gpio",
 		.of_compatible	= "x-powers,axp209-gpio",
@@ -591,6 +591,37 @@ static const struct mfd_cell axp20x_cells[] = {
 		.resources	= axp20x_pek_resources,
 	}, {
 		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp20x-regulator",
+	}, {
+		.name		= "axp20x-adc",
+		.of_compatible	= "x-powers,axp209-adc",
+	}, {
+		.name		= "axp20x-battery-power-supply",
+		.of_compatible	= "x-powers,axp209-battery-power-supply",
+	}, {
+		.name		= "axp20x-ac-power-supply",
+		.of_compatible	= "x-powers,axp202-ac-power-supply",
+		.num_resources	= ARRAY_SIZE(axp20x_ac_power_supply_resources),
+		.resources	= axp20x_ac_power_supply_resources,
+	}, {
+		.name		= "axp20x-usb-power-supply",
+		.of_compatible	= "x-powers,axp202-usb-power-supply",
+		.num_resources	= ARRAY_SIZE(axp20x_usb_power_supply_resources),
+		.resources	= axp20x_usb_power_supply_resources,
+	},
+};
+
+static const struct mfd_cell axp209_cells[] = {
+	{
+		.name		= "axp20x-gpio",
+		.of_compatible	= "x-powers,axp209-gpio",
+	}, {
+		.name		= "axp20x-pek",
+		.num_resources	= ARRAY_SIZE(axp20x_pek_resources),
+		.resources	= axp20x_pek_resources,
+	}, {
+		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp209-regulator",
 	}, {
 		.name		= "axp20x-adc",
 		.of_compatible	= "x-powers,axp209-adc",
@@ -620,6 +651,7 @@ static const struct mfd_cell axp221_cells[] = {
 		.resources	= axp22x_pek_resources,
 	}, {
 		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp22x-regulator",
 	}, {
 		.name		= "axp22x-adc",
 		.of_compatible	= "x-powers,axp221-adc",
@@ -655,6 +687,7 @@ static const struct mfd_cell axp223_cells[] = {
 		.of_compatible	= "x-powers,axp221-battery-power-supply",
 	}, {
 		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp22x-regulator",
 	}, {
 		.name		= "axp20x-ac-power-supply",
 		.of_compatible	= "x-powers,axp221-ac-power-supply",
@@ -762,8 +795,10 @@ static const struct mfd_cell axp803_cells[] = {
 		.num_resources	= ARRAY_SIZE(axp803_usb_power_supply_resources),
 		.resources	= axp803_usb_power_supply_resources,
 		.of_compatible	= "x-powers,axp813-usb-power-supply",
+	},{
+		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp803-regulator",
 	},
-	{	.name		= "axp20x-regulator" },
 };
 
 static const struct mfd_cell axp806_self_working_cells[] = {
@@ -771,14 +806,17 @@ static const struct mfd_cell axp806_self_working_cells[] = {
 		.name		= "axp221-pek",
 		.num_resources	= ARRAY_SIZE(axp806_pek_resources),
 		.resources	= axp806_pek_resources,
+	},{
+		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp806-regulator",
 	},
-	{	.name		= "axp20x-regulator" },
 };
 
 static const struct mfd_cell axp806_cells[] = {
 	{
 		.id		= 2,
 		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp806-regulator"
 	},
 };
 
@@ -793,6 +831,7 @@ static const struct mfd_cell axp809_cells[] = {
 	}, {
 		.id		= 1,
 		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp809-regulator",
 	},
 };
 
@@ -803,6 +842,7 @@ static const struct mfd_cell axp813_cells[] = {
 		.resources	= axp803_pek_resources,
 	}, {
 		.name		= "axp20x-regulator",
+		.of_compatible	= "x-powers,axp813-regulator",
 	}, {
 		.name		= "axp20x-gpio",
 		.of_compatible	= "x-powers,axp813-gpio",
@@ -867,9 +907,14 @@ int axp20x_match_device(struct axp20x_dev *axp20x)
 		axp20x->regmap_irq_chip = &axp152_regmap_irq_chip;
 		break;
 	case AXP202_ID:
+		axp20x->nr_cells = ARRAY_SIZE(axp202_cells);
+		axp20x->cells = axp202_cells;
+		axp20x->regmap_cfg = &axp20x_regmap_config;
+		axp20x->regmap_irq_chip = &axp20x_regmap_irq_chip;
+		break;
 	case AXP209_ID:
-		axp20x->nr_cells = ARRAY_SIZE(axp20x_cells);
-		axp20x->cells = axp20x_cells;
+		axp20x->nr_cells = ARRAY_SIZE(axp209_cells);
+		axp20x->cells = axp209_cells;
 		axp20x->regmap_cfg = &axp20x_regmap_config;
 		axp20x->regmap_irq_chip = &axp20x_regmap_irq_chip;
 		break;
