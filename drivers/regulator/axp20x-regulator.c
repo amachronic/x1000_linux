@@ -416,31 +416,26 @@ struct axp20x_variant_data {
 	bool (*has_soft_start_emulation) (int id);
 };
 
-struct axp20x_regulator_priv {
-	enum axp20x_variants variant;
-	const struct axp20x_variant_data *var_data;
-};
-
 static int axp20x_regulator_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 {
-	struct axp20x_regulator_priv *priv = rdev_get_drvdata(rdev);
+	const struct axp20x_variant_data *var_data = rdev_get_drvdata(rdev);
 
-	if (!priv->var_data->set_ramp_delay)
+	if (!var_data->set_ramp_delay)
 		return -ENOTSUPP;
 
-	return priv->var_data->set_ramp_delay(rdev, ramp);
+	return var_data->set_ramp_delay(rdev, ramp);
 }
 
 static int axp20x_regulator_enable_regmap(struct regulator_dev *rdev)
 {
-	struct axp20x_regulator_priv *priv = rdev_get_drvdata(rdev);
+	const struct axp20x_variant_data *var_data = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
 
 	/*
 	 * Check if we support soft start emulation for this regulator.
 	 */
-	if (priv->var_data->has_soft_start_emulation &&
-	    priv->var_data->has_soft_start_emulation(id) &&
+	if (var_data->has_soft_start_emulation &&
+	    var_data->has_soft_start_emulation(id) &&
 	    rdev->constraints && rdev->constraints->soft_start) {
 		int v_out;
 		int ret;
@@ -1054,35 +1049,29 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 {
 	struct regulator_dev *rdev, **rdevs;
 	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
+	const struct axp20x_variant_data *var_data = device_get_match_data(&pdev->dev);
 	struct regulator_config config = {
 		.dev = pdev->dev.parent,
 		.regmap = axp20x->regmap,
+		.driver_data = (void *)var_data,
 	};
 	int ret, i;
 	u32 workmode;
-
-	struct axp20x_regulator_priv *priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
-	if (!priv)
-		return -ENOMEM;
-
-	priv->variant = axp20x->variant;
-	priv->var_data = device_get_match_data(&pdev->dev);
-	config.driver_data = priv;
 
 	/*
 	 * We need to store a pointer to each registered regulator for the
 	 * duration of this function, in order to resolve the supply names
 	 * for regulators that are supplied by another regulator.
 	 */
-	rdevs = kcalloc(priv->var_data->num_regulators, sizeof(*rdevs), GFP_KERNEL);
+	rdevs = kcalloc(var_data->num_regulators, sizeof(*rdevs), GFP_KERNEL);
 	if (!rdevs)
 		return -ENOMEM;
 
 	/* This only sets the dcdc freq. Ignore any errors */
-	axp20x_regulator_parse_dt(pdev, priv->var_data, axp20x->regmap);
+	axp20x_regulator_parse_dt(pdev, var_data, axp20x->regmap);
 
-	for (i = 0; i < priv->var_data->num_regulators; i++) {
-		const struct regulator_desc *desc = &priv->var_data->regulators[i];
+	for (i = 0; i < var_data->num_regulators; i++) {
+		const struct regulator_desc *desc = &var_data->regulators[i];
 		struct regulator_desc *new_desc;
 
 		/*
@@ -1090,8 +1079,8 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		 * skip it, as its controls are bound to the master
 		 * regulator and won't work.
 		 */
-		if (priv->var_data->is_polyphase_slave &&
-		    priv->var_data->is_polyphase_slave(axp20x->regmap, i))
+		if (var_data->is_polyphase_slave &&
+		    var_data->is_polyphase_slave(axp20x->regmap, i))
 			continue;
 
 		/*
@@ -1109,8 +1098,8 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 			int supply_id = -EINVAL;
 			struct regulator_dev *supply_rdev;
 
-			if (priv->var_data->get_supply_regulator_id)
-				supply_id = priv->var_data->get_supply_regulator_id(desc->id);
+			if (var_data->get_supply_regulator_id)
+				supply_id = var_data->get_supply_regulator_id(desc->id);
 
 			if (supply_id < 0) {
 				dev_err(&pdev->dev, "Missing supply for %s\n", desc->name);
@@ -1152,20 +1141,20 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 					   "x-powers,dcdc-workmode",
 					   &workmode);
 		if (!ret) {
-			if (!priv->var_data->set_dcdc_workmode ||
-			    priv->var_data->set_dcdc_workmode(rdev, i, workmode))
+			if (!var_data->set_dcdc_workmode ||
+			    var_data->set_dcdc_workmode(rdev, i, workmode))
 				dev_err(&pdev->dev, "Failed to set workmode on %s\n",
 					rdev->desc->name);
 		}
 	}
 
-	if (priv->var_data->drivevbus_regulator &&
+	if (var_data->drivevbus_regulator &&
 	    of_property_read_bool(pdev->dev.parent->of_node, "x-powers,drive-vbus-en")) {
 		/* Change N_VBUSEN sense pin to DRIVEVBUS output pin */
 		regmap_update_bits(axp20x->regmap, AXP20X_OVER_TMP,
 				   AXP22X_MISC_N_VBUSEN_FUNC, 0);
 		rdev = devm_regulator_register(&pdev->dev,
-					       priv->var_data->drivevbus_regulator,
+					       var_data->drivevbus_regulator,
 					       &config);
 		if (IS_ERR(rdev)) {
 			dev_err(&pdev->dev, "Failed to register drivevbus\n");
