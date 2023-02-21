@@ -1209,8 +1209,11 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		    priv->var_data->is_polyphase_slave(axp20x->regmap, i))
 			continue;
 
-		/* Support for AXP813's FLDO3 is not implemented */
-		if (axp20x->variant == AXP813_ID && i == AXP813_FLDO3)
+		/*
+		 * Skip regulators that do not have a name, these will be dummy
+		 * entries for unimplemented regulators (eg. the AXP813's FLDO3).
+		 */
+		if (!desc->name)
 			continue;
 
 		/*
