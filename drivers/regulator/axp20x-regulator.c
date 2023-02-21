@@ -360,8 +360,15 @@
 		.ops		= &axp20x_ops_range,				\
 	}
 
+struct axp20x_variant_data {
+	const struct regulator_desc	*regulators;
+	int				num_regulators;
+	const struct regulator_desc	*drivevbus_regulator;
+};
+
 struct axp20x_regulator_priv {
 	enum axp20x_variants variant;
+	const struct axp20x_variant_data *var_data;
 };
 
 static const int axp209_dcdc2_ldo3_slew_rates[] = {
@@ -1212,68 +1219,28 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 {
 	struct regulator_dev *rdev;
 	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
-	const struct regulator_desc *regulators;
 	struct regulator_config config = {
 		.dev = pdev->dev.parent,
 		.regmap = axp20x->regmap,
 	};
-	int ret, i, nregulators;
+	int ret, i;
 	u32 workmode;
 	const char *dcdc1_name = axp22x_regulators[AXP22X_DCDC1].name;
 	const char *dcdc5_name = axp22x_regulators[AXP22X_DCDC5].name;
-	bool drivevbus = false;
 
 	struct axp20x_regulator_priv *priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
 
 	priv->variant = axp20x->variant;
+	priv->var_data = device_get_match_data(&pdev->dev);
 	config.driver_data = priv;
-
-	switch (axp20x->variant) {
-	case AXP202_ID:
-	case AXP209_ID:
-		regulators = axp20x_regulators;
-		nregulators = AXP20X_REG_ID_MAX;
-		break;
-	case AXP221_ID:
-	case AXP223_ID:
-		regulators = axp22x_regulators;
-		nregulators = AXP22X_REG_ID_MAX;
-		drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
-						  "x-powers,drive-vbus-en");
-		break;
-	case AXP803_ID:
-		regulators = axp803_regulators;
-		nregulators = AXP803_REG_ID_MAX;
-		drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
-						  "x-powers,drive-vbus-en");
-		break;
-	case AXP806_ID:
-		regulators = axp806_regulators;
-		nregulators = AXP806_REG_ID_MAX;
-		break;
-	case AXP809_ID:
-		regulators = axp809_regulators;
-		nregulators = AXP809_REG_ID_MAX;
-		break;
-	case AXP813_ID:
-		regulators = axp813_regulators;
-		nregulators = AXP813_REG_ID_MAX;
-		drivevbus = of_property_read_bool(pdev->dev.parent->of_node,
-						  "x-powers,drive-vbus-en");
-		break;
-	default:
-		dev_err(&pdev->dev, "Unsupported AXP variant: %ld\n",
-			axp20x->variant);
-		return -EINVAL;
-	}
 
 	/* This only sets the dcdc freq. Ignore any errors */
 	axp20x_regulator_parse_dt(pdev);
 
-	for (i = 0; i < nregulators; i++) {
-		const struct regulator_desc *desc = &regulators[i];
+	for (i = 0; i < priv->var_data->num_regulators; i++) {
+		const struct regulator_desc *desc = &priv->var_data->regulators[i];
 		struct regulator_desc *new_desc;
 
 		/*
@@ -1297,36 +1264,34 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		 * part of this loop to see where we save the DT defined
 		 * name.
 		 */
-		if ((regulators == axp22x_regulators && i == AXP22X_DC1SW) ||
-		    (regulators == axp803_regulators && i == AXP803_DC1SW) ||
-		    (regulators == axp809_regulators && i == AXP809_DC1SW)) {
+		if ((priv->var_data->regulators == axp22x_regulators && i == AXP22X_DC1SW) ||
+		    (priv->var_data->regulators == axp803_regulators && i == AXP803_DC1SW) ||
+		    (priv->var_data->regulators == axp809_regulators && i == AXP809_DC1SW)) {
 			new_desc = devm_kzalloc(&pdev->dev, sizeof(*desc),
 						GFP_KERNEL);
 			if (!new_desc)
 				return -ENOMEM;
 
-			*new_desc = regulators[i];
+			*new_desc = *desc;
 			new_desc->supply_name = dcdc1_name;
 			desc = new_desc;
 		}
 
-		if ((regulators == axp22x_regulators && i == AXP22X_DC5LDO) ||
-		    (regulators == axp809_regulators && i == AXP809_DC5LDO)) {
+		if ((priv->var_data->regulators == axp22x_regulators && i == AXP22X_DC5LDO) ||
+		    (priv->var_data->regulators == axp809_regulators && i == AXP809_DC5LDO)) {
 			new_desc = devm_kzalloc(&pdev->dev, sizeof(*desc),
 						GFP_KERNEL);
 			if (!new_desc)
 				return -ENOMEM;
 
-			*new_desc = regulators[i];
+			*new_desc = *desc;
 			new_desc->supply_name = dcdc5_name;
 			desc = new_desc;
 		}
 
 		rdev = devm_regulator_register(&pdev->dev, desc, &config);
 		if (IS_ERR(rdev)) {
-			dev_err(&pdev->dev, "Failed to register %s\n",
-				regulators[i].name);
-
+			dev_err(&pdev->dev, "Failed to register %s\n", desc->name);
 			return PTR_ERR(rdev);
 		}
 
@@ -1342,25 +1307,26 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		/*
 		 * Save AXP22X DCDC1 / DCDC5 regulator names for later.
 		 */
-		if ((regulators == axp22x_regulators && i == AXP22X_DCDC1) ||
-		    (regulators == axp809_regulators && i == AXP809_DCDC1))
+		if ((priv->var_data->regulators == axp22x_regulators && i == AXP22X_DCDC1) ||
+		    (priv->var_data->regulators == axp809_regulators && i == AXP809_DCDC1))
 			of_property_read_string(rdev->dev.of_node,
 						"regulator-name",
 						&dcdc1_name);
 
-		if ((regulators == axp22x_regulators && i == AXP22X_DCDC5) ||
-		    (regulators == axp809_regulators && i == AXP809_DCDC5))
+		if ((priv->var_data->regulators == axp22x_regulators && i == AXP22X_DCDC5) ||
+		    (priv->var_data->regulators == axp809_regulators && i == AXP809_DCDC5))
 			of_property_read_string(rdev->dev.of_node,
 						"regulator-name",
 						&dcdc5_name);
 	}
 
-	if (drivevbus) {
+	if (priv->var_data->drivevbus_regulator &&
+	    of_property_read_bool(pdev->dev.parent->of_node, "x-powers,drive-vbus-en")) {
 		/* Change N_VBUSEN sense pin to DRIVEVBUS output pin */
 		regmap_update_bits(axp20x->regmap, AXP20X_OVER_TMP,
 				   AXP22X_MISC_N_VBUSEN_FUNC, 0);
 		rdev = devm_regulator_register(&pdev->dev,
-					       &axp22x_drivevbus_regulator,
+					       priv->var_data->drivevbus_regulator,
 					       &config);
 		if (IS_ERR(rdev)) {
 			dev_err(&pdev->dev, "Failed to register drivevbus\n");
@@ -1371,10 +1337,56 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct axp20x_variant_data axp20x_data = {
+	.regulators		= axp20x_regulators,
+	.num_regulators		= ARRAY_SIZE(axp20x_regulators),
+};
+
+static const struct axp20x_variant_data axp22x_data = {
+	.regulators		= axp22x_regulators,
+	.num_regulators		= ARRAY_SIZE(axp22x_regulators),
+	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
+};
+
+static const struct axp20x_variant_data axp803_data = {
+	.regulators		= axp803_regulators,
+	.num_regulators		= ARRAY_SIZE(axp803_regulators),
+	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
+};
+
+static const struct axp20x_variant_data axp806_data = {
+	.regulators		= axp806_regulators,
+	.num_regulators		= ARRAY_SIZE(axp806_regulators),
+};
+
+static const struct axp20x_variant_data axp809_data = {
+	.regulators		= axp809_regulators,
+	.num_regulators		= ARRAY_SIZE(axp809_regulators),
+};
+
+static const struct axp20x_variant_data axp813_data = {
+	.regulators		= axp813_regulators,
+	.num_regulators		= ARRAY_SIZE(axp813_regulators),
+	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
+};
+
+static const struct of_device_id axp20x_regulator_of_matches[] = {
+	{ .compatible = "x-powers,axp202-regulator", .data = &axp20x_data },
+	{ .compatible = "x-powers,axp209-regulator", .data = &axp20x_data },
+	{ .compatible = "x-powers,axp22x-regulator", .data = &axp22x_data },
+	{ .compatible = "x-powers,axp803-regulator", .data = &axp803_data },
+	{ .compatible = "x-powers,axp806-regulator", .data = &axp806_data },
+	{ .compatible = "x-powers,axp809-regulator", .data = &axp809_data },
+	{ .compatible = "x-powers,axp813-regulator", .data = &axp813_data },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, axp20x_regulator_of_matches);
+
 static struct platform_driver axp20x_regulator_driver = {
 	.probe	= axp20x_regulator_probe,
 	.driver	= {
 		.name		= "axp20x-regulator",
+		.of_match_table	= axp20x_regulator_of_matches,
 	},
 };
 
