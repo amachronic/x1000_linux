@@ -401,79 +401,21 @@ struct axp20x_regulator_data {
 	 * Set DCDC regulator working mode from device tree property.
 	 */
 	int (*set_dcdc_workmode) (struct regulator_dev *rdev, int id, u32 workmode);
+
+	/*
+	 * Configure voltage ramp delay for the given regulator.
+	 */
+	int (*set_ramp_delay) (struct regulator_dev *rdev, int ramp);
 };
 
-static const int axp209_dcdc2_ldo3_slew_rates[] = {
-	1600,
-	 800,
-};
-
-static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
+static int axp20x_regulator_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 {
 	const struct axp20x_regulator_data *data = rdev_get_drvdata(rdev);
-	struct regmap *regmap = rdev_get_regmap(rdev);
-	int id = rdev_get_id(rdev);
-	u8 reg, mask, enable, cfg = 0xff;
-	const int *slew_rates;
-	int rate_count = 0;
 
-	switch (data->variant) {
-	case AXP209_ID:
-		if (id == AXP20X_DCDC2) {
-			slew_rates = axp209_dcdc2_ldo3_slew_rates;
-			rate_count = ARRAY_SIZE(axp209_dcdc2_ldo3_slew_rates);
-			reg = AXP20X_DCDC2_LDO3_V_RAMP;
-			mask = AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_RATE_MASK |
-			       AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_EN_MASK;
-			enable = (ramp > 0) ?
-				 AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_EN : 0;
-			break;
-		}
-
-		if (id == AXP20X_LDO3) {
-			slew_rates = axp209_dcdc2_ldo3_slew_rates;
-			rate_count = ARRAY_SIZE(axp209_dcdc2_ldo3_slew_rates);
-			reg = AXP20X_DCDC2_LDO3_V_RAMP;
-			mask = AXP20X_DCDC2_LDO3_V_RAMP_LDO3_RATE_MASK |
-			       AXP20X_DCDC2_LDO3_V_RAMP_LDO3_EN_MASK;
-			enable = (ramp > 0) ?
-				 AXP20X_DCDC2_LDO3_V_RAMP_LDO3_EN : 0;
-			break;
-		}
-
-		if (rate_count > 0)
-			break;
-
-		fallthrough;
-	default:
-		/* Not supported for this regulator */
+	if (!data->set_ramp_delay)
 		return -ENOTSUPP;
-	}
 
-	if (ramp == 0) {
-		cfg = enable;
-	} else {
-		int i;
-
-		for (i = 0; i < rate_count; i++) {
-			if (ramp > slew_rates[i])
-				break;
-
-			if (id == AXP20X_DCDC2)
-				cfg = AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_RATE(i);
-			else
-				cfg = AXP20X_DCDC2_LDO3_V_RAMP_LDO3_RATE(i);
-		}
-
-		if (cfg == 0xff) {
-			dev_err(&rdev->dev, "unsupported ramp value %d", ramp);
-			return -EINVAL;
-		}
-
-		cfg |= enable;
-	}
-
-	return regmap_update_bits(regmap, reg, mask, cfg);
+	return data->set_ramp_delay(rdev, ramp);
 }
 
 static int axp20x_regulator_enable_regmap(struct regulator_dev *rdev)
@@ -546,7 +488,7 @@ static const struct regulator_ops axp20x_ops = {
 	.enable			= axp20x_regulator_enable_regmap,
 	.disable		= regulator_disable_regmap,
 	.is_enabled		= regulator_is_enabled_regmap,
-	.set_ramp_delay		= axp20x_set_ramp_delay,
+	.set_ramp_delay		= axp20x_regulator_set_ramp_delay,
 };
 
 static const struct regulator_ops axp20x_ops_sw = {
@@ -1125,6 +1067,70 @@ static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 work
 	return regmap_update_bits(rdev->regmap, AXP20X_DCDC_MODE, mask, value);
 }
 
+static const int axp20x_dcdc2_ldo3_slew_rates[] = {
+	1600,
+	 800,
+};
+
+static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
+{
+	int id = rdev_get_id(rdev);
+	u8 reg, mask, enable, cfg = 0xff;
+	const int *slew_rates;
+	int rate_count;
+
+	switch (id) {
+	case AXP20X_DCDC2:
+		slew_rates = axp20x_dcdc2_ldo3_slew_rates;
+		rate_count = ARRAY_SIZE(axp20x_dcdc2_ldo3_slew_rates);
+		reg = AXP20X_DCDC2_LDO3_V_RAMP;
+		mask = AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_RATE_MASK |
+			AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_EN_MASK;
+		enable = (ramp > 0) ?
+			AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_EN : 0;
+		break;
+
+	case AXP20X_LDO3:
+		slew_rates = axp20x_dcdc2_ldo3_slew_rates;
+		rate_count = ARRAY_SIZE(axp20x_dcdc2_ldo3_slew_rates);
+		reg = AXP20X_DCDC2_LDO3_V_RAMP;
+		mask = AXP20X_DCDC2_LDO3_V_RAMP_LDO3_RATE_MASK |
+			AXP20X_DCDC2_LDO3_V_RAMP_LDO3_EN_MASK;
+		enable = (ramp > 0) ?
+			AXP20X_DCDC2_LDO3_V_RAMP_LDO3_EN : 0;
+		break;
+
+	default:
+		/* Not supported for this regulator */
+		return -ENOTSUPP;
+	}
+
+	if (ramp == 0) {
+		cfg = enable;
+	} else {
+		int i;
+
+		for (i = 0; i < rate_count; i++) {
+			if (ramp > slew_rates[i])
+				break;
+
+			if (id == AXP20X_DCDC2)
+				cfg = AXP20X_DCDC2_LDO3_V_RAMP_DCDC2_RATE(i);
+			else
+				cfg = AXP20X_DCDC2_LDO3_V_RAMP_LDO3_RATE(i);
+		}
+
+		if (cfg == 0xff) {
+			dev_err(&rdev->dev, "unsupported ramp value %d", ramp);
+			return -EINVAL;
+		}
+
+		cfg |= enable;
+	}
+
+	return regmap_update_bits(rdev->regmap, reg, mask, cfg);
+}
+
 static const struct axp20x_dcdc_freq_range axp20x_dcdc_freq_range = {
 	.min = 750,
 	.max = 1875,
@@ -1139,6 +1145,7 @@ static const struct axp20x_regulator_data axp202_data = {
 	.dcdc_freq_reg			= AXP20X_DCDC_FREQ,
 	.dcdc_freq_range		= &axp20x_dcdc_freq_range,
 	.set_dcdc_workmode		= axp20x_set_dcdc_workmode,
+	.set_ramp_delay			= axp20x_set_ramp_delay,
 };
 
 static const struct axp20x_regulator_data axp209_data = {
@@ -1148,6 +1155,7 @@ static const struct axp20x_regulator_data axp209_data = {
 	.dcdc_freq_reg			= AXP20X_DCDC_FREQ,
 	.dcdc_freq_range		= &axp20x_dcdc_freq_range,
 	.set_dcdc_workmode		= axp20x_set_dcdc_workmode,
+	.set_ramp_delay			= axp20x_set_ramp_delay,
 };
 
 static int axp22x_get_supply_regulator_id(int id)
