@@ -405,6 +405,15 @@ struct axp20x_variant_data {
 	 * Configure voltage ramp delay for the given regulator.
 	 */
 	int (*set_ramp_delay) (struct regulator_dev *rdev, int ramp);
+
+	/*
+	 * Check if the regulator should support soft start emulation.
+	 * If enabled and soft start is requested in machine constraints,
+	 * soft start is emulated by setting the regulator to the minimum
+	 * voltage before enabling it, then setting it to the configured
+	 * voltage. This is used to work around problems on some machines.
+	 */
+	bool (*has_soft_start_emulation) (int id);
 };
 
 struct axp20x_regulator_priv {
@@ -427,46 +436,36 @@ static int axp20x_regulator_enable_regmap(struct regulator_dev *rdev)
 	struct axp20x_regulator_priv *priv = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
 
-	switch (priv->variant) {
-	case AXP209_ID:
-		if ((id == AXP20X_LDO3) &&
-		    rdev->constraints && rdev->constraints->soft_start) {
-			int v_out;
-			int ret;
+	/*
+	 * Check if we support soft start emulation for this regulator.
+	 */
+	if (priv->var_data->has_soft_start_emulation &&
+	    priv->var_data->has_soft_start_emulation(id) &&
+	    rdev->constraints && rdev->constraints->soft_start) {
+		int v_out;
+		int ret;
 
-			/*
-			 * On some boards, the LDO3 can be overloaded when
-			 * turning on, causing the entire PMIC to shutdown
-			 * without warning. Turning it on at the minimal voltage
-			 * and then setting the voltage to the requested value
-			 * works reliably.
-			 */
-			if (regulator_is_enabled_regmap(rdev))
-				break;
+		if (regulator_is_enabled_regmap(rdev))
+			return regulator_enable_regmap(rdev);
 
-			v_out = regulator_get_voltage_sel_regmap(rdev);
-			if (v_out < 0)
-				return v_out;
+		v_out = regulator_get_voltage_sel_regmap(rdev);
+		if (v_out < 0)
+			return v_out;
 
-			if (v_out == 0)
-				break;
+		if (v_out == 0)
+			return regulator_enable_regmap(rdev);
 
-			ret = regulator_set_voltage_sel_regmap(rdev, 0x00);
-			/*
-			 * A small pause is needed between
-			 * setting the voltage and enabling the LDO to give the
-			 * internal state machine time to process the request.
-			 */
-			usleep_range(1000, 5000);
-			ret |= regulator_enable_regmap(rdev);
-			ret |= regulator_set_voltage_sel_regmap(rdev, v_out);
+		ret = regulator_set_voltage_sel_regmap(rdev, 0x00);
+		/*
+		 * A small pause is needed between
+		 * setting the voltage and enabling the LDO to give the
+		 * internal state machine time to process the request.
+		 */
+		usleep_range(1000, 5000);
+		ret |= regulator_enable_regmap(rdev);
+		ret |= regulator_set_voltage_sel_regmap(rdev, v_out);
 
-			return ret;
-		}
-		break;
-	default:
-		/* No quirks */
-		break;
+		return ret;
 	}
 
 	return regulator_enable_regmap(rdev);
@@ -1396,6 +1395,18 @@ static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 	return regmap_update_bits(rdev->regmap, reg, mask, cfg);
 }
 
+static bool axp209_has_soft_start_emulation(int id)
+{
+	/*
+	 * On some boards, the LDO3 can be overloaded when
+	 * turning on, causing the entire PMIC to shutdown
+	 * without warning. Turning it on at the minimal voltage
+	 * and then setting the voltage to the requested value
+	 * works reliably.
+	 */
+	return id == AXP20X_LDO3;
+}
+
 static const struct axp20x_dcdc_freq_range axp20x_dcdc_freq_range = {
 	.min = 750,
 	.max = 1875,
@@ -1403,13 +1414,23 @@ static const struct axp20x_dcdc_freq_range axp20x_dcdc_freq_range = {
 	.step = 75,
 };
 
-static const struct axp20x_variant_data axp20x_data = {
+static const struct axp20x_variant_data axp202_data = {
 	.regulators		= axp20x_regulators,
 	.num_regulators		= ARRAY_SIZE(axp20x_regulators),
 	.dcdc_freq_reg		= AXP20X_DCDC_FREQ,
 	.dcdc_freq_range	= &axp20x_dcdc_freq_range,
 	.set_dcdc_workmode	= axp20x_set_dcdc_workmode,
 	.set_ramp_delay		= axp20x_set_ramp_delay,
+};
+
+static const struct axp20x_variant_data axp209_data = {
+	.regulators		= axp20x_regulators,
+	.num_regulators		= ARRAY_SIZE(axp20x_regulators),
+	.dcdc_freq_reg		= AXP20X_DCDC_FREQ,
+	.dcdc_freq_range	= &axp20x_dcdc_freq_range,
+	.set_dcdc_workmode	= axp20x_set_dcdc_workmode,
+	.set_ramp_delay		= axp20x_set_ramp_delay,
+	.has_soft_start_emulation = axp209_has_soft_start_emulation,
 };
 
 static const struct axp20x_dcdc_freq_range axp22x_dcdc_freq_range = {
@@ -1471,8 +1492,8 @@ static const struct axp20x_variant_data axp813_data = {
 };
 
 static const struct of_device_id axp20x_regulator_of_matches[] = {
-	{ .compatible = "x-powers,axp202-regulator", .data = &axp20x_data },
-	{ .compatible = "x-powers,axp209-regulator", .data = &axp20x_data },
+	{ .compatible = "x-powers,axp202-regulator", .data = &axp202_data },
+	{ .compatible = "x-powers,axp209-regulator", .data = &axp209_data },
 	{ .compatible = "x-powers,axp22x-regulator", .data = &axp22x_data },
 	{ .compatible = "x-powers,axp803-regulator", .data = &axp803_data },
 	{ .compatible = "x-powers,axp806-regulator", .data = &axp806_data },
