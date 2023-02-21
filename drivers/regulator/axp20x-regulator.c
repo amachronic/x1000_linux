@@ -361,11 +361,28 @@
 		.ops		= &axp20x_ops_range,				\
 	}
 
+/**
+ * struct axp20x_dcdc_freq_range - Defines range information for DCDC frequency setting
+ * @min:	Minimum frequency in KHz
+ * @max:	Maximum frequency in KHz
+ * @def:	Default frequency in KHz
+ * @step:	Frequency step size in KHz
+ */
+struct axp20x_dcdc_freq_range {
+	u32 min;
+	u32 max;
+	u32 def;
+	u32 step;
+};
+
 struct axp20x_regulator_data {
 	enum axp20x_variants		variant;
 	const struct regulator_desc	*regulators;
 	int				num_regulators;
 	const struct regulator_desc	*drivevbus_regulator;
+
+	unsigned int dcdc_freq_reg;
+	const struct axp20x_dcdc_freq_range *dcdc_freq_range;
 
 	/*
 	 * Return true if the regulator should be registered with the
@@ -1028,72 +1045,40 @@ static const struct regulator_desc axp813_regulators[] = {
 		    AXP22X_PWR_OUT_CTRL2, AXP22X_PWR_OUT_DC1SW_MASK),
 };
 
-static int axp20x_set_dcdc_freq(struct platform_device *pdev, u32 dcdcfreq)
+static int axp20x_set_dcdc_freq(struct platform_device *pdev,
+				const struct axp20x_regulator_data *data,
+				struct regmap *regmap, u32 dcdcfreq)
 {
-	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
-	unsigned int reg = AXP20X_DCDC_FREQ;
-	u32 min, max, def, step;
-
-	switch (axp20x->variant) {
-	case AXP202_ID:
-	case AXP209_ID:
-		min = 750;
-		max = 1875;
-		def = 1500;
-		step = 75;
-		break;
-	case AXP803_ID:
-	case AXP813_ID:
-		/*
-		 * AXP803/AXP813 DCDC work frequency setting has the same
-		 * range and step as AXP22X, but at a different register.
-		 * (See include/linux/mfd/axp20x.h)
-		 */
-		reg = AXP803_DCDC_FREQ_CTRL;
-		fallthrough;	/* to the check below */
-	case AXP806_ID:
-		/*
-		 * AXP806 also have DCDC work frequency setting register at a
-		 * different position.
-		 */
-		if (axp20x->variant == AXP806_ID)
-			reg = AXP806_DCDC_FREQ_CTRL;
-		fallthrough;
-	case AXP221_ID:
-	case AXP809_ID:
-		min = 1800;
-		max = 4050;
-		def = 3000;
-		step = 150;
-		break;
-	default:
+	if (!data->dcdc_freq_range) {
 		dev_err(&pdev->dev,
 			"Setting DCDC frequency for unsupported AXP variant\n");
 		return -EINVAL;
 	}
 
 	if (dcdcfreq == 0)
-		dcdcfreq = def;
+		dcdcfreq = data->dcdc_freq_range->def;
 
-	if (dcdcfreq < min) {
-		dcdcfreq = min;
+	if (dcdcfreq < data->dcdc_freq_range->min) {
+		dcdcfreq = data->dcdc_freq_range->min;
 		dev_warn(&pdev->dev, "DCDC frequency too low. Set to %ukHz\n",
-			 min);
+			 data->dcdc_freq_range->min);
 	}
 
-	if (dcdcfreq > max) {
-		dcdcfreq = max;
+	if (dcdcfreq > data->dcdc_freq_range->max) {
+		dcdcfreq = data->dcdc_freq_range->max;
 		dev_warn(&pdev->dev, "DCDC frequency too high. Set to %ukHz\n",
-			 max);
+			 data->dcdc_freq_range->max);
 	}
 
-	dcdcfreq = (dcdcfreq - min) / step;
+	dcdcfreq = (dcdcfreq - data->dcdc_freq_range->min) / data->dcdc_freq_range->step;
 
-	return regmap_update_bits(axp20x->regmap, reg,
+	return regmap_update_bits(regmap, data->dcdc_freq_reg,
 				  AXP20X_FREQ_DCDC_MASK, dcdcfreq);
 }
 
-static int axp20x_regulator_parse_dt(struct platform_device *pdev)
+static int axp20x_regulator_parse_dt(struct platform_device *pdev,
+				     const struct axp20x_regulator_data *data,
+				     struct regmap *regmap)
 {
 	struct device_node *np, *regulators;
 	int ret = 0;
@@ -1108,7 +1093,7 @@ static int axp20x_regulator_parse_dt(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "regulators node not found\n");
 	} else {
 		of_property_read_u32(regulators, "x-powers,dcdc-freq", &dcdcfreq);
-		ret = axp20x_set_dcdc_freq(pdev, dcdcfreq);
+		ret = axp20x_set_dcdc_freq(pdev, data, regmap, dcdcfreq);
 		if (ret < 0) {
 			dev_err(&pdev->dev, "Error setting dcdc frequency: %d\n", ret);
 		}
@@ -1140,10 +1125,19 @@ static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 work
 	return regmap_update_bits(rdev->regmap, AXP20X_DCDC_MODE, mask, value);
 }
 
+static const struct axp20x_dcdc_freq_range axp20x_dcdc_freq_range = {
+	.min = 750,
+	.max = 1875,
+	.def = 1500,
+	.step = 75,
+};
+
 static const struct axp20x_regulator_data axp202_data = {
 	.variant			= AXP202_ID,
 	.regulators			= axp20x_regulators,
 	.num_regulators			= ARRAY_SIZE(axp20x_regulators),
+	.dcdc_freq_reg			= AXP20X_DCDC_FREQ,
+	.dcdc_freq_range		= &axp20x_dcdc_freq_range,
 	.set_dcdc_workmode		= axp20x_set_dcdc_workmode,
 };
 
@@ -1151,6 +1145,8 @@ static const struct axp20x_regulator_data axp209_data = {
 	.variant			= AXP209_ID,
 	.regulators			= axp20x_regulators,
 	.num_regulators			= ARRAY_SIZE(axp20x_regulators),
+	.dcdc_freq_reg			= AXP20X_DCDC_FREQ,
+	.dcdc_freq_range		= &axp20x_dcdc_freq_range,
 	.set_dcdc_workmode		= axp20x_set_dcdc_workmode,
 };
 
@@ -1186,11 +1182,20 @@ static int axp22x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 work
 	return axp22x_set_dcdc_workmode_inner(rdev, AXP20X_DCDC_MODE, id, workmode);
 }
 
+static const struct axp20x_dcdc_freq_range axp22x_dcdc_freq_range = {
+	.min = 1800,
+	.max = 4050,
+	.def = 3000,
+	.step = 150,
+};
+
 static const struct axp20x_regulator_data axp22x_data = {
 	.variant			= AXP221_ID,
 	.regulators			= axp22x_regulators,
 	.num_regulators			= ARRAY_SIZE(axp22x_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
+	.dcdc_freq_reg			= AXP20X_DCDC_FREQ,
+	.dcdc_freq_range		= &axp22x_dcdc_freq_range,
 	.get_supply_regulator_id	= axp22x_get_supply_regulator_id,
 	.set_dcdc_workmode		= axp22x_set_dcdc_workmode,
 };
@@ -1243,6 +1248,8 @@ static const struct axp20x_regulator_data axp803_data = {
 	.regulators			= axp803_regulators,
 	.num_regulators			= ARRAY_SIZE(axp803_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
+	.dcdc_freq_reg			= AXP803_DCDC_FREQ_CTRL,
+	.dcdc_freq_range		= &axp22x_dcdc_freq_range,
 	.is_regulator_supported		= axp803_is_regulator_supported,
 	.get_supply_regulator_id	= axp803_get_supply_regulator_id,
 	.set_dcdc_workmode		= axp803_set_dcdc_workmode,
@@ -1285,6 +1292,8 @@ static const struct axp20x_regulator_data axp806_data = {
 	.variant			= AXP806_ID,
 	.regulators			= axp806_regulators,
 	.num_regulators			= ARRAY_SIZE(axp806_regulators),
+	.dcdc_freq_reg			= AXP806_DCDC_FREQ_CTRL,
+	.dcdc_freq_range		= &axp22x_dcdc_freq_range,
 	.is_regulator_supported		= axp806_is_regulator_supported,
 	.set_dcdc_workmode		= axp806_set_dcdc_workmode,
 };
@@ -1305,6 +1314,8 @@ static const struct axp20x_regulator_data axp809_data = {
 	.variant			= AXP809_ID,
 	.regulators			= axp809_regulators,
 	.num_regulators			= ARRAY_SIZE(axp809_regulators),
+	.dcdc_freq_reg			= AXP20X_DCDC_FREQ,
+	.dcdc_freq_range		= &axp22x_dcdc_freq_range,
 	.get_supply_regulator_id	= axp809_get_supply_regulator_id,
 };
 
@@ -1337,6 +1348,8 @@ static const struct axp20x_regulator_data axp813_data = {
 	.regulators			= axp813_regulators,
 	.num_regulators			= ARRAY_SIZE(axp813_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
+	.dcdc_freq_reg			= AXP803_DCDC_FREQ_CTRL,
+	.dcdc_freq_range		= &axp22x_dcdc_freq_range,
 	.is_regulator_supported		= axp813_is_regulator_supported,
 	.set_dcdc_workmode		= axp813_set_dcdc_workmode,
 };
@@ -1405,7 +1418,7 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	/* This only sets the dcdc freq. Ignore any errors */
-	axp20x_regulator_parse_dt(pdev);
+	axp20x_regulator_parse_dt(pdev, data, axp20x->regmap);
 
 	for (i = 0; i < data->num_regulators; i++) {
 		const struct regulator_desc *desc = &data->regulators[i];
