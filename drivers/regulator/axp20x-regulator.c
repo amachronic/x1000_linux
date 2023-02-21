@@ -13,6 +13,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/bitfield.h>
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -377,6 +378,11 @@ struct axp20x_variant_data {
 	 * This function should return the ID of the supplying regulator.
 	 */
 	int (*get_supply_regulator_id) (int id);
+
+	/*
+	 * Set DCDC regulator working mode from device tree property.
+	 */
+	int (*set_dcdc_workmode) (struct regulator_dev *rdev, int id, u32 workmode);
 };
 
 struct axp20x_regulator_priv {
@@ -1118,67 +1124,6 @@ static int axp20x_regulator_parse_dt(struct platform_device *pdev)
 	return ret;
 }
 
-static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
-{
-	struct axp20x_regulator_priv *priv = rdev_get_drvdata(rdev);
-	unsigned int reg = AXP20X_DCDC_MODE;
-	unsigned int mask;
-
-	switch (priv->variant) {
-	case AXP202_ID:
-	case AXP209_ID:
-		if ((id != AXP20X_DCDC2) && (id != AXP20X_DCDC3))
-			return -EINVAL;
-
-		mask = AXP20X_WORKMODE_DCDC2_MASK;
-		if (id == AXP20X_DCDC3)
-			mask = AXP20X_WORKMODE_DCDC3_MASK;
-
-		workmode <<= ffs(mask) - 1;
-		break;
-
-	case AXP806_ID:
-		/*
-		 * AXP806 DCDC regulator IDs have the same range as AXP22X.
-		 * (See include/linux/mfd/axp20x.h)
-		 */
-		reg = AXP806_DCDC_MODE_CTRL2;
-		fallthrough;	/* to the check below */
-	case AXP221_ID:
-	case AXP223_ID:
-	case AXP809_ID:
-		if (id < AXP22X_DCDC1 || id > AXP22X_DCDC5)
-			return -EINVAL;
-
-		mask = AXP22X_WORKMODE_DCDCX_MASK(id - AXP22X_DCDC1);
-		workmode <<= id - AXP22X_DCDC1;
-		break;
-
-	case AXP803_ID:
-		if (id < AXP803_DCDC1 || id > AXP803_DCDC6)
-			return -EINVAL;
-
-		mask = AXP22X_WORKMODE_DCDCX_MASK(id - AXP803_DCDC1);
-		workmode <<= id - AXP803_DCDC1;
-		break;
-
-	case AXP813_ID:
-		if (id < AXP813_DCDC1 || id > AXP813_DCDC7)
-			return -EINVAL;
-
-		mask = AXP22X_WORKMODE_DCDCX_MASK(id - AXP813_DCDC1);
-		workmode <<= id - AXP813_DCDC1;
-		break;
-
-	default:
-		/* should not happen */
-		WARN_ON(1);
-		return -EINVAL;
-	}
-
-	return regmap_update_bits(rdev->regmap, reg, mask, workmode);
-}
-
 static int axp20x_regulator_probe(struct platform_device *pdev)
 {
 	struct regulator_dev *rdev, **rdevs;
@@ -1281,7 +1226,8 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 					   "x-powers,dcdc-workmode",
 					   &workmode);
 		if (!ret) {
-			if (axp20x_set_dcdc_workmode(rdev, i, workmode))
+			if (!priv->var_data->set_dcdc_workmode ||
+			    priv->var_data->set_dcdc_workmode(rdev, i, workmode))
 				dev_err(&pdev->dev, "Failed to set workmode on %s\n",
 					rdev->desc->name);
 		}
@@ -1381,9 +1327,88 @@ static int axp809_get_supply_regulator_id(int id)
 	return -EINVAL;
 }
 
+static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
+{
+	unsigned int mask;
+	unsigned int value;
+
+	switch (id) {
+	case AXP20X_DCDC2:
+		mask = AXP20X_WORKMODE_DCDC2_MASK;
+		value = FIELD_PREP(AXP20X_WORKMODE_DCDC2_MASK, workmode);
+		break;
+	case AXP20X_DCDC3:
+		mask = AXP20X_WORKMODE_DCDC3_MASK;
+		value = FIELD_PREP(AXP20X_WORKMODE_DCDC3_MASK, workmode);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return regmap_update_bits(rdev->regmap, AXP20X_DCDC_MODE, mask, value);
+}
+
+static int axp22x_set_dcdc_workmode_inner(struct regulator_dev *rdev, unsigned int reg,
+					  int id, u32 workmode)
+{
+	unsigned int mask;
+	unsigned int value;
+
+	if (id < AXP22X_DCDC1 || id > AXP22X_DCDC5)
+		return -EINVAL;
+
+	mask = AXP22X_WORKMODE_DCDCX_MASK(id - AXP22X_DCDC1);
+	value = workmode <<= (id - AXP22X_DCDC1);
+
+	return regmap_update_bits(rdev->regmap, reg, mask, value);
+}
+
+static int axp22x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
+{
+	return axp22x_set_dcdc_workmode_inner(rdev, AXP20X_DCDC_MODE, id, workmode);
+}
+
+static int axp806_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
+{
+	/*
+	 * AXP806 DCDC regulator IDs have the same range as AXP22X.
+	 * (See include/linux/mfd/axp20x.h)
+	 */
+	return axp22x_set_dcdc_workmode_inner(rdev, AXP806_DCDC_MODE_CTRL2, id, workmode);
+}
+
+static int axp803_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
+{
+	unsigned int mask;
+	unsigned int value;
+
+	if (id < AXP803_DCDC1 || id > AXP803_DCDC6)
+		return -EINVAL;
+
+	mask = AXP22X_WORKMODE_DCDCX_MASK(id - AXP803_DCDC1);
+	value = workmode <<= (id - AXP803_DCDC1);
+
+	return regmap_update_bits(rdev->regmap, AXP20X_DCDC_MODE, mask, value);
+}
+
+static int axp813_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
+{
+	unsigned int mask;
+	unsigned int value;
+
+	if (id < AXP813_DCDC1 || id > AXP813_DCDC7)
+		return -EINVAL;
+
+	mask = AXP22X_WORKMODE_DCDCX_MASK(id - AXP813_DCDC1);
+	value = workmode <<= (id - AXP813_DCDC1);
+
+	return regmap_update_bits(rdev->regmap, AXP20X_DCDC_MODE, mask, value);
+}
+
 static const struct axp20x_variant_data axp20x_data = {
 	.regulators		= axp20x_regulators,
 	.num_regulators		= ARRAY_SIZE(axp20x_regulators),
+	.set_dcdc_workmode	= axp20x_set_dcdc_workmode,
 };
 
 static const struct axp20x_variant_data axp22x_data = {
@@ -1391,6 +1416,7 @@ static const struct axp20x_variant_data axp22x_data = {
 	.num_regulators		= ARRAY_SIZE(axp22x_regulators),
 	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
 	.get_supply_regulator_id = axp22x_get_supply_regulator_id,
+	.set_dcdc_workmode	= axp22x_set_dcdc_workmode,
 };
 
 static const struct axp20x_variant_data axp803_data = {
@@ -1399,18 +1425,22 @@ static const struct axp20x_variant_data axp803_data = {
 	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
 	.is_polyphase_slave	= axp803_is_polyphase_slave,
 	.get_supply_regulator_id = axp803_get_supply_regulator_id,
+	.set_dcdc_workmode	= axp803_set_dcdc_workmode,
 };
 
 static const struct axp20x_variant_data axp806_data = {
 	.regulators		= axp806_regulators,
 	.num_regulators		= ARRAY_SIZE(axp806_regulators),
 	.is_polyphase_slave	= axp806_is_polyphase_slave,
+	.set_dcdc_workmode	= axp806_set_dcdc_workmode,
 };
 
 static const struct axp20x_variant_data axp809_data = {
 	.regulators		= axp809_regulators,
 	.num_regulators		= ARRAY_SIZE(axp809_regulators),
 	.get_supply_regulator_id = axp809_get_supply_regulator_id,
+	/* AXP809 has the same DCDC workmode settings as AXP22x */
+	.set_dcdc_workmode	= axp22x_set_dcdc_workmode,
 };
 
 static const struct axp20x_variant_data axp813_data = {
@@ -1419,6 +1449,7 @@ static const struct axp20x_variant_data axp813_data = {
 	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
 	/* AXP813 has the same polyphase options as AXP803 */
 	.is_polyphase_slave	= axp803_is_polyphase_slave,
+	.set_dcdc_workmode	= axp813_set_dcdc_workmode,
 };
 
 static const struct of_device_id axp20x_regulator_of_matches[] = {
