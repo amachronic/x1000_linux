@@ -371,6 +371,13 @@ struct axp20x_regulator_data {
 	 * regulator subsystem. Unsupported regulators will be ignored.
 	 */
 	bool (*is_regulator_supported)(struct regmap *regmap, int id);
+
+	/*
+	 * If regulator with the given ID defines a NULL supply name, it
+	 * is assumed to be supplied from another regulator on the PMIC.
+	 * This function should return the ID of the supplying regulator.
+	 */
+	int (*get_supply_regulator_id) (int id);
 };
 
 static const int axp209_dcdc2_ldo3_slew_rates[] = {
@@ -1179,11 +1186,24 @@ static const struct axp20x_regulator_data axp209_data = {
 	.num_regulators			= ARRAY_SIZE(axp20x_regulators),
 };
 
+static int axp22x_get_supply_regulator_id(int id)
+{
+	switch (id) {
+	case AXP22X_DC1SW:
+		return AXP22X_DCDC1;
+	case AXP22X_DC5LDO:
+		return AXP22X_DCDC5;
+	}
+
+	return -EINVAL;
+}
+
 static const struct axp20x_regulator_data axp22x_data = {
 	.variant			= AXP221_ID,
 	.regulators			= axp22x_regulators,
 	.num_regulators			= ARRAY_SIZE(axp22x_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
+	.get_supply_regulator_id	= axp22x_get_supply_regulator_id,
 };
 
 static bool axp803_is_regulator_supported(struct regmap *regmap, int id)
@@ -1207,12 +1227,21 @@ static bool axp803_is_regulator_supported(struct regmap *regmap, int id)
 	}
 }
 
+static int axp803_get_supply_regulator_id(int id)
+{
+	if (id == AXP803_DC1SW)
+		return AXP803_DCDC1;
+
+	return -EINVAL;
+}
+
 static const struct axp20x_regulator_data axp803_data = {
 	.variant			= AXP803_ID,
 	.regulators			= axp803_regulators,
 	.num_regulators			= ARRAY_SIZE(axp803_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
 	.is_regulator_supported		= axp803_is_regulator_supported,
+	.get_supply_regulator_id	= axp803_get_supply_regulator_id,
 };
 
 static bool axp806_is_regulator_supported(struct regmap *regmap, int id)
@@ -1246,10 +1275,23 @@ static const struct axp20x_regulator_data axp806_data = {
 	.is_regulator_supported		= axp806_is_regulator_supported,
 };
 
+static int axp809_get_supply_regulator_id(int id)
+{
+	switch (id) {
+	case AXP809_DC1SW:
+		return AXP809_DCDC1;
+	case AXP809_DC5LDO:
+		return AXP809_DCDC5;
+	}
+
+	return -EINVAL;
+}
+
 static const struct axp20x_regulator_data axp809_data = {
 	.variant			= AXP809_ID,
 	.regulators			= axp809_regulators,
 	.num_regulators			= ARRAY_SIZE(axp809_regulators),
+	.get_supply_regulator_id	= axp809_get_supply_regulator_id,
 };
 
 static bool axp813_is_regulator_supported(struct regmap *regmap, int id)
@@ -1302,7 +1344,7 @@ axp20x_regulator_fallback_match(enum axp20x_variants variant)
 
 static int axp20x_regulator_probe(struct platform_device *pdev)
 {
-	struct regulator_dev *rdev;
+	struct regulator_dev *rdev, **rdevs;
 	const struct axp20x_regulator_data *data;
 	struct axp20x_dev *axp20x = dev_get_drvdata(pdev->dev.parent);
 	struct regulator_config config = {
@@ -1311,8 +1353,6 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	};
 	int ret, i;
 	u32 workmode;
-	const char *dcdc1_name = axp22x_regulators[AXP22X_DCDC1].name;
-	const char *dcdc5_name = axp22x_regulators[AXP22X_DCDC5].name;
 
 	data = device_get_match_data(&pdev->dev);
 	if (!data) {
@@ -1325,6 +1365,15 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	}
 
 	config.driver_data = (void *)data;
+
+	/*
+	 * We need to store a pointer to each registered regulator for the
+	 * duration of this function, in order to resolve the supply names
+	 * for regulators that are supplied by another regulator.
+	 */
+	rdevs = kcalloc(data->num_regulators, sizeof(*rdevs), GFP_KERNEL);
+	if (!rdevs)
+		return -ENOMEM;
 
 	/* This only sets the dcdc freq. Ignore any errors */
 	axp20x_regulator_parse_dt(pdev);
@@ -1339,44 +1388,51 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 			continue;
 
 		/*
-		 * Regulators DC1SW and DC5LDO are connected internally,
-		 * so we have to handle their supply names separately.
-		 *
-		 * We always register the regulators in proper sequence,
-		 * so the supply names are correctly read. See the last
-		 * part of this loop to see where we save the DT defined
-		 * name.
+		 * If no static supply is defined, this regulator is assumed to be
+		 * supplied by another, previously registered regulator.
 		 */
-		if ((data->regulators == axp22x_regulators && i == AXP22X_DC1SW) ||
-		    (data->regulators == axp803_regulators && i == AXP803_DC1SW) ||
-		    (data->regulators == axp809_regulators && i == AXP809_DC1SW)) {
-			new_desc = devm_kzalloc(&pdev->dev, sizeof(*desc),
-						GFP_KERNEL);
-			if (!new_desc)
-				return -ENOMEM;
+		if (!desc->supply_name) {
+			int supply_id = -EINVAL;
+			struct regulator_dev *supply_rdev;
+
+			if (data->get_supply_regulator_id)
+				supply_id = data->get_supply_regulator_id(desc->id);
+
+			if (supply_id < 0) {
+				dev_err(&pdev->dev, "Missing supply for %s\n", desc->name);
+				ret = supply_id;
+				goto free_rdevs;
+			}
+
+			supply_rdev = rdevs[supply_id];
+			if (!supply_rdev) {
+				dev_err(&pdev->dev, "Supply for %s not registered\n", desc->name);
+				ret = -EINVAL;
+				goto free_rdevs;
+			}
+
+			new_desc = devm_kzalloc(&pdev->dev, sizeof(*desc), GFP_KERNEL);
+			if (!new_desc) {
+				ret = -ENOMEM;
+				goto free_rdevs;
+			}
 
 			*new_desc = *desc;
-			new_desc->supply_name = dcdc1_name;
-			desc = new_desc;
-		}
+			new_desc->supply_name = supply_rdev->desc->name;
+			of_property_read_string(rdev->dev.of_node, "regulator-name",
+						&new_desc->supply_name);
 
-		if ((data->regulators == axp22x_regulators && i == AXP22X_DC5LDO) ||
-		    (data->regulators == axp809_regulators && i == AXP809_DC5LDO)) {
-			new_desc = devm_kzalloc(&pdev->dev, sizeof(*desc),
-						GFP_KERNEL);
-			if (!new_desc)
-				return -ENOMEM;
-
-			*new_desc = *desc;
-			new_desc->supply_name = dcdc5_name;
 			desc = new_desc;
 		}
 
 		rdev = devm_regulator_register(&pdev->dev, desc, &config);
 		if (IS_ERR(rdev)) {
 			dev_err(&pdev->dev, "Failed to register %s\n", desc->name);
-			return PTR_ERR(rdev);
+			ret = PTR_ERR(rdev);
+			goto free_rdevs;
 		}
+
+		rdevs[desc->id] = rdev;
 
 		ret = of_property_read_u32(rdev->dev.of_node,
 					   "x-powers,dcdc-workmode",
@@ -1386,21 +1442,6 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 				dev_err(&pdev->dev, "Failed to set workmode on %s\n",
 					rdev->desc->name);
 		}
-
-		/*
-		 * Save AXP22X DCDC1 / DCDC5 regulator names for later.
-		 */
-		if ((data->regulators == axp22x_regulators && i == AXP22X_DCDC1) ||
-		    (data->regulators == axp809_regulators && i == AXP809_DCDC1))
-			of_property_read_string(rdev->dev.of_node,
-						"regulator-name",
-						&dcdc1_name);
-
-		if ((data->regulators == axp22x_regulators && i == AXP22X_DCDC5) ||
-		    (data->regulators == axp809_regulators && i == AXP809_DCDC5))
-			of_property_read_string(rdev->dev.of_node,
-						"regulator-name",
-						&dcdc5_name);
 	}
 
 	if (data->drivevbus_regulator &&
@@ -1413,11 +1454,16 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 					       &config);
 		if (IS_ERR(rdev)) {
 			dev_err(&pdev->dev, "Failed to register drivevbus\n");
-			return PTR_ERR(rdev);
+			ret = PTR_ERR(rdev);
+			goto free_rdevs;
 		}
 	}
 
-	return 0;
+	ret = 0;
+
+free_rdevs:
+	kfree(rdevs);
+	return ret;
 }
 
 static const struct of_device_id axp20x_regulator_of_matches[] = {
