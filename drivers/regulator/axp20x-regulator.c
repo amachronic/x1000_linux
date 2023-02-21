@@ -364,6 +364,12 @@ struct axp20x_variant_data {
 	const struct regulator_desc	*regulators;
 	int				num_regulators;
 	const struct regulator_desc	*drivevbus_regulator;
+
+	/*
+	 * This function checks whether a regulator is part of a poly-phase
+	 * output setup based on the registers settings. Returns true if it is.
+	 */
+	bool (*is_polyphase_slave) (struct regmap *regmap, int id);
 };
 
 struct axp20x_regulator_priv {
@@ -1166,55 +1172,6 @@ static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 work
 	return regmap_update_bits(rdev->regmap, reg, mask, workmode);
 }
 
-/*
- * This function checks whether a regulator is part of a poly-phase
- * output setup based on the registers settings. Returns true if it is.
- */
-static bool axp20x_is_polyphase_slave(struct axp20x_dev *axp20x, int id)
-{
-	u32 reg = 0;
-
-	/*
-	 * Currently in our supported AXP variants, only AXP803, AXP806,
-	 * and AXP813 have polyphase regulators.
-	 */
-	switch (axp20x->variant) {
-	case AXP803_ID:
-	case AXP813_ID:
-		regmap_read(axp20x->regmap, AXP803_POLYPHASE_CTRL, &reg);
-
-		switch (id) {
-		case AXP803_DCDC3:
-			return !!(reg & AXP803_DCDC23_POLYPHASE_DUAL);
-		case AXP803_DCDC6:
-			return !!(reg & AXP803_DCDC56_POLYPHASE_DUAL);
-		}
-		break;
-
-	case AXP806_ID:
-		regmap_read(axp20x->regmap, AXP806_DCDC_MODE_CTRL2, &reg);
-
-		switch (id) {
-		case AXP806_DCDCB:
-			return (((reg & AXP806_DCDCABC_POLYPHASE_MASK) ==
-				AXP806_DCDCAB_POLYPHASE_DUAL) ||
-				((reg & AXP806_DCDCABC_POLYPHASE_MASK) ==
-				AXP806_DCDCABC_POLYPHASE_TRI));
-		case AXP806_DCDCC:
-			return ((reg & AXP806_DCDCABC_POLYPHASE_MASK) ==
-				AXP806_DCDCABC_POLYPHASE_TRI);
-		case AXP806_DCDCE:
-			return !!(reg & AXP806_DCDCDE_POLYPHASE_DUAL);
-		}
-		break;
-
-	default:
-		return false;
-	}
-
-	return false;
-}
-
 static int axp20x_regulator_probe(struct platform_device *pdev)
 {
 	struct regulator_dev *rdev;
@@ -1248,7 +1205,8 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 		 * skip it, as its controls are bound to the master
 		 * regulator and won't work.
 		 */
-		if (axp20x_is_polyphase_slave(axp20x, i))
+		if (priv->var_data->is_polyphase_slave &&
+		    priv->var_data->is_polyphase_slave(axp20x->regmap, i))
 			continue;
 
 		/* Support for AXP813's FLDO3 is not implemented */
@@ -1337,6 +1295,46 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	return 0;
 }
 
+/*
+ * Also used for the AXP813 which has the same regulator numbering
+ * for DCDC3 and DCDC6 (which are the only regulators that can be
+ * configured in a polyphase setup).
+ */
+static bool axp803_is_polyphase_slave(struct regmap *regmap, int id)
+{
+	unsigned int reg;
+
+	regmap_read(regmap, AXP803_POLYPHASE_CTRL, &reg);
+
+	switch (id) {
+	case AXP803_DCDC3:
+		return !!(reg & AXP803_DCDC23_POLYPHASE_DUAL);
+	case AXP803_DCDC6:
+		return !!(reg & AXP803_DCDC56_POLYPHASE_DUAL);
+	}
+
+	return false;
+}
+
+static bool axp806_is_polyphase_slave(struct regmap *regmap, int id)
+{
+	unsigned int reg;
+
+	regmap_read(regmap, AXP806_DCDC_MODE_CTRL2, &reg);
+
+	switch (id) {
+	case AXP806_DCDCB:
+		return ((reg & AXP806_DCDCABC_POLYPHASE_MASK) == AXP806_DCDCAB_POLYPHASE_DUAL) ||
+		       ((reg & AXP806_DCDCABC_POLYPHASE_MASK) == AXP806_DCDCABC_POLYPHASE_TRI);
+	case AXP806_DCDCC:
+		return (reg & AXP806_DCDCABC_POLYPHASE_MASK) == AXP806_DCDCABC_POLYPHASE_TRI;
+	case AXP806_DCDCE:
+		return !!(reg & AXP806_DCDCDE_POLYPHASE_DUAL);
+	}
+
+	return false;
+}
+
 static const struct axp20x_variant_data axp20x_data = {
 	.regulators		= axp20x_regulators,
 	.num_regulators		= ARRAY_SIZE(axp20x_regulators),
@@ -1352,11 +1350,13 @@ static const struct axp20x_variant_data axp803_data = {
 	.regulators		= axp803_regulators,
 	.num_regulators		= ARRAY_SIZE(axp803_regulators),
 	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
+	.is_polyphase_slave	= axp803_is_polyphase_slave,
 };
 
 static const struct axp20x_variant_data axp806_data = {
 	.regulators		= axp806_regulators,
 	.num_regulators		= ARRAY_SIZE(axp806_regulators),
+	.is_polyphase_slave	= axp806_is_polyphase_slave,
 };
 
 static const struct axp20x_variant_data axp809_data = {
@@ -1368,6 +1368,8 @@ static const struct axp20x_variant_data axp813_data = {
 	.regulators		= axp813_regulators,
 	.num_regulators		= ARRAY_SIZE(axp813_regulators),
 	.drivevbus_regulator	= &axp22x_drivevbus_regulator,
+	/* AXP813 has the same polyphase options as AXP803 */
+	.is_polyphase_slave	= axp803_is_polyphase_slave,
 };
 
 static const struct of_device_id axp20x_regulator_of_matches[] = {
