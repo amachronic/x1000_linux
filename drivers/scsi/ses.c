@@ -73,9 +73,12 @@ static void init_device_slot_control(unsigned char *dest_desc,
 	dest_desc[3] &= 0x3c;
 }
 
-
-static int ses_recv_diag(struct scsi_device *sdev, int page_code,
-			 void *buf, int bufflen)
+/*
+ * Raw RECEIVE_DIAGNOSTIC page command. Does not check the returned
+ * page code, which may differ from the requested page code!
+ */
+static int __ses_recv_diag(struct scsi_device *sdev, int page_code,
+			   void *buf, int bufflen)
 {
 	int ret;
 	unsigned char cmd[] = {
@@ -86,7 +89,6 @@ static int ses_recv_diag(struct scsi_device *sdev, int page_code,
 		bufflen & 0xff,
 		0
 	};
-	unsigned char recv_page_code;
 	unsigned int retries = SES_RETRIES;
 	struct scsi_sense_hdr sshdr;
 	const struct scsi_exec_args exec_args = {
@@ -100,6 +102,15 @@ static int ses_recv_diag(struct scsi_device *sdev, int page_code,
 		 (sshdr.sense_key == NOT_READY ||
 		  (sshdr.sense_key == UNIT_ATTENTION && sshdr.asc == 0x29)));
 
+	return ret;
+}
+
+static int ses_recv_diag(struct scsi_device *sdev, int page_code,
+			 void *buf, int bufflen)
+{
+	unsigned char recv_page_code;
+	int ret = __ses_recv_diag(sdev, page_code, buf, bufflen);
+
 	if (unlikely(ret))
 		return ret;
 
@@ -108,8 +119,11 @@ static int ses_recv_diag(struct scsi_device *sdev, int page_code,
 	if (likely(recv_page_code == page_code))
 		return ret;
 
-	/* successful diagnostic but wrong page code.  This happens to some
-	 * USB devices, just print a message and pretend there was an error */
+	/*
+	 * Successful diagnostic but wrong page code. Shouldn't happen
+	 * except for simple subenclosures, which should already have
+	 * been detected by this point.
+	 */
 
 	sdev_printk(KERN_ERR, sdev,
 		    "Wrong diagnostic page; asked for %d got %u\n",
@@ -695,11 +709,33 @@ static int ses_intf_add(struct device *cdev)
 	if (!hdr_buf || !ses_dev)
 		goto err_init_free;
 
+	/*
+	 * Read without checking page code, getting a different page
+	 * is not necessarily an error for devices with only a simple
+	 * subenclosure (eg. some USB drives).
+	 */
 	page = 1;
-	result = ses_recv_diag(sdev, page, hdr_buf, INIT_ALLOC_SIZE);
+	result = __ses_recv_diag(sdev, page, hdr_buf, INIT_ALLOC_SIZE);
 	if (result)
 		goto recv_failed;
 
+	/*
+	 * A simple subenclosure only supports page 8 and will return
+	 * it after any diagnostic page request. Simple subenclosures
+	 * are not supported by this driver -- there is simply no data
+	 * to report besides a vendor specific byte -- but they will
+	 * not be treated as an error.
+	 */
+	if (hdr_buf[0] == 8) {
+		err = 0;
+		goto err_init_free;
+	}
+
+	/*
+	 * All diagnostic pages will include a length field so even
+	 * if the page code is incorrect at this point, that'll get
+	 * detected when re-reading the page.
+	 */
 	len = (hdr_buf[2] << 8) + hdr_buf[3] + 4;
 	buf = kzalloc(len, GFP_KERNEL);
 	if (!buf)
@@ -817,7 +853,8 @@ page2_not_supported:
  err_init_free:
 	kfree(ses_dev);
 	kfree(hdr_buf);
-	sdev_printk(KERN_ERR, sdev, "Failed to bind enclosure %d\n", err);
+	if (err)
+		sdev_printk(KERN_ERR, sdev, "Failed to bind enclosure %d\n", err);
 	return err;
 }
 
