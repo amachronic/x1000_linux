@@ -361,6 +361,7 @@
 	}
 
 struct axp20x_regulator_data {
+	enum axp20x_variants		variant;
 	const struct regulator_desc	*regulators;
 	int				num_regulators;
 	const struct regulator_desc	*drivevbus_regulator;
@@ -373,13 +374,14 @@ static const int axp209_dcdc2_ldo3_slew_rates[] = {
 
 static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 {
-	struct axp20x_dev *axp20x = rdev_get_drvdata(rdev);
+	const struct axp20x_regulator_data *data = rdev_get_drvdata(rdev);
+	struct regmap *regmap = rdev_get_regmap(rdev);
 	int id = rdev_get_id(rdev);
 	u8 reg, mask, enable, cfg = 0xff;
 	const int *slew_rates;
 	int rate_count = 0;
 
-	switch (axp20x->variant) {
+	switch (data->variant) {
 	case AXP209_ID:
 		if (id == AXP20X_DCDC2) {
 			slew_rates = axp209_dcdc2_ldo3_slew_rates;
@@ -428,22 +430,22 @@ static int axp20x_set_ramp_delay(struct regulator_dev *rdev, int ramp)
 		}
 
 		if (cfg == 0xff) {
-			dev_err(axp20x->dev, "unsupported ramp value %d", ramp);
+			dev_err(&rdev->dev, "unsupported ramp value %d", ramp);
 			return -EINVAL;
 		}
 
 		cfg |= enable;
 	}
 
-	return regmap_update_bits(axp20x->regmap, reg, mask, cfg);
+	return regmap_update_bits(regmap, reg, mask, cfg);
 }
 
 static int axp20x_regulator_enable_regmap(struct regulator_dev *rdev)
 {
-	struct axp20x_dev *axp20x = rdev_get_drvdata(rdev);
+	const struct axp20x_regulator_data *data = rdev_get_drvdata(rdev);
 	int id = rdev_get_id(rdev);
 
-	switch (axp20x->variant) {
+	switch (data->variant) {
 	case AXP209_ID:
 		if ((id == AXP20X_LDO3) &&
 		    rdev->constraints && rdev->constraints->soft_start) {
@@ -1039,7 +1041,6 @@ static int axp20x_set_dcdc_freq(struct platform_device *pdev, u32 dcdcfreq)
 			reg = AXP806_DCDC_FREQ_CTRL;
 		fallthrough;
 	case AXP221_ID:
-	case AXP223_ID:
 	case AXP809_ID:
 		min = 1800;
 		max = 4050;
@@ -1101,11 +1102,12 @@ static int axp20x_regulator_parse_dt(struct platform_device *pdev)
 
 static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 workmode)
 {
-	struct axp20x_dev *axp20x = rdev_get_drvdata(rdev);
+	const struct axp20x_regulator_data *data = rdev_get_drvdata(rdev);
+	struct regmap *regmap = rdev_get_regmap(rdev);
 	unsigned int reg = AXP20X_DCDC_MODE;
 	unsigned int mask;
 
-	switch (axp20x->variant) {
+	switch (data->variant) {
 	case AXP202_ID:
 	case AXP209_ID:
 		if ((id != AXP20X_DCDC2) && (id != AXP20X_DCDC3))
@@ -1126,7 +1128,6 @@ static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 work
 		reg = AXP806_DCDC_MODE_CTRL2;
 		fallthrough;	/* to the check below */
 	case AXP221_ID:
-	case AXP223_ID:
 	case AXP809_ID:
 		if (id < AXP22X_DCDC1 || id > AXP22X_DCDC5)
 			return -EINVAL;
@@ -1157,7 +1158,7 @@ static int axp20x_set_dcdc_workmode(struct regulator_dev *rdev, int id, u32 work
 		return -EINVAL;
 	}
 
-	return regmap_update_bits(rdev->regmap, reg, mask, workmode);
+	return regmap_update_bits(regmap, reg, mask, workmode);
 }
 
 /*
@@ -1209,34 +1210,46 @@ static bool axp20x_is_polyphase_slave(struct axp20x_dev *axp20x, int id)
 	return false;
 }
 
-static const struct axp20x_regulator_data axp20x_data = {
+static const struct axp20x_regulator_data axp202_data = {
+	.variant			= AXP202_ID,
+	.regulators			= axp20x_regulators,
+	.num_regulators			= ARRAY_SIZE(axp20x_regulators),
+};
+
+static const struct axp20x_regulator_data axp209_data = {
+	.variant			= AXP209_ID,
 	.regulators			= axp20x_regulators,
 	.num_regulators			= ARRAY_SIZE(axp20x_regulators),
 };
 
 static const struct axp20x_regulator_data axp22x_data = {
+	.variant			= AXP221_ID,
 	.regulators			= axp22x_regulators,
 	.num_regulators			= ARRAY_SIZE(axp22x_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
 };
 
 static const struct axp20x_regulator_data axp803_data = {
+	.variant			= AXP803_ID,
 	.regulators			= axp803_regulators,
 	.num_regulators			= ARRAY_SIZE(axp803_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
 };
 
 static const struct axp20x_regulator_data axp806_data = {
+	.variant			= AXP806_ID,
 	.regulators			= axp806_regulators,
 	.num_regulators			= ARRAY_SIZE(axp806_regulators),
 };
 
 static const struct axp20x_regulator_data axp809_data = {
+	.variant			= AXP809_ID,
 	.regulators			= axp809_regulators,
 	.num_regulators			= ARRAY_SIZE(axp809_regulators),
 };
 
 static const struct axp20x_regulator_data axp813_data = {
+	.variant			= AXP813_ID,
 	.regulators			= axp813_regulators,
 	.num_regulators			= ARRAY_SIZE(axp813_regulators),
 	.drivevbus_regulator		= &axp22x_drivevbus_regulator,
@@ -1253,8 +1266,9 @@ axp20x_regulator_fallback_match(enum axp20x_variants variant)
 {
 	switch (variant) {
 	case AXP202_ID:
+		return &axp202_data;
 	case AXP209_ID:
-		return &axp20x_data;
+		return &axp209_data;
 	case AXP221_ID:
 	case AXP223_ID:
 		return &axp22x_data;
@@ -1279,7 +1293,6 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 	struct regulator_config config = {
 		.dev = pdev->dev.parent,
 		.regmap = axp20x->regmap,
-		.driver_data = axp20x,
 	};
 	int ret, i;
 	u32 workmode;
@@ -1295,6 +1308,8 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 			return -EINVAL;
 		}
 	}
+
+	config.driver_data = (void *)data;
 
 	/* This only sets the dcdc freq. Ignore any errors */
 	axp20x_regulator_parse_dt(pdev);
@@ -1398,8 +1413,8 @@ static int axp20x_regulator_probe(struct platform_device *pdev)
 }
 
 static const struct of_device_id axp20x_regulator_of_matches[] = {
-	{ .compatible = "x-powers,axp202-regulator", .data = &axp20x_data },
-	{ .compatible = "x-powers,axp209-regulator", .data = &axp20x_data },
+	{ .compatible = "x-powers,axp202-regulator", .data = &axp202_data },
+	{ .compatible = "x-powers,axp209-regulator", .data = &axp209_data },
 	{ .compatible = "x-powers,axp22x-regulator", .data = &axp22x_data },
 	{ .compatible = "x-powers,axp803-regulator", .data = &axp803_data },
 	{ .compatible = "x-powers,axp806-regulator", .data = &axp806_data },
