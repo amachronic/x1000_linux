@@ -110,24 +110,22 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 	 * suppress pointless writes.
 	 */
 	for (i = 0; i < d->chip->num_regs; i++) {
-		if (d->chip->mask_base) {
-			if (d->chip->handle_mask_sync)
-				d->chip->handle_mask_sync(d->map, i,
-							  d->mask_buf_def[i],
-							  d->mask_buf[i],
-							  d->chip->irq_drv_data);
-			else {
-				reg = d->get_irq_reg(d, d->chip->mask_base, i);
-				ret = regmap_update_bits(d->map, reg,
-						d->mask_buf_def[i],
-						d->mask_buf[i]);
-				if (ret)
-					dev_err(d->map->dev, "Failed to sync masks in %x\n",
-						reg);
-			}
+		if (d->chip->handle_mask_sync)
+			d->chip->handle_mask_sync(d->map, i,
+						  d->mask_buf_def[i],
+						  d->mask_buf[i],
+						  d->chip->irq_drv_data);
+
+		if (d->chip->mask_base && !d->chip->handle_mask_sync) {
+			reg = d->get_irq_reg(d, d->chip->mask_base, i);
+			ret = regmap_update_bits(d->map, reg,
+						 d->mask_buf_def[i],
+						 d->mask_buf[i]);
+			if (ret)
+				dev_err(d->map->dev, "Failed to sync masks in %x\n", reg);
 		}
 
-		if (d->chip->unmask_base) {
+		if (d->chip->unmask_base && !d->chip->handle_mask_sync) {
 			reg = d->get_irq_reg(d, d->chip->unmask_base, i);
 			ret = regmap_update_bits(d->map, reg,
 					d->mask_buf_def[i], ~d->mask_buf[i]);
@@ -765,28 +763,28 @@ int regmap_add_irq_chip_fwnode(struct fwnode_handle *fwnode,
 	for (i = 0; i < chip->num_regs; i++) {
 		d->mask_buf[i] = d->mask_buf_def[i];
 
-		if (chip->mask_base) {
-			if (chip->handle_mask_sync) {
-				ret = chip->handle_mask_sync(d->map, i,
-							     d->mask_buf_def[i],
-							     d->mask_buf[i],
-							     chip->irq_drv_data);
-				if (ret)
-					goto err_alloc;
-			} else {
-				reg = d->get_irq_reg(d, chip->mask_base, i);
-				ret = regmap_update_bits(d->map, reg,
-						d->mask_buf_def[i],
-						d->mask_buf[i]);
-				if (ret) {
-					dev_err(map->dev, "Failed to set masks in 0x%x: %d\n",
-						reg, ret);
-					goto err_alloc;
-				}
+		if (chip->handle_mask_sync) {
+			ret = chip->handle_mask_sync(d->map, i,
+						     d->mask_buf_def[i],
+						     d->mask_buf[i],
+						     chip->irq_drv_data);
+			if (ret)
+				goto err_alloc;
+		}
+
+		if (chip->mask_base && !chip->handle_mask_sync) {
+			reg = d->get_irq_reg(d, chip->mask_base, i);
+			ret = regmap_update_bits(d->map, reg,
+						 d->mask_buf_def[i],
+						 d->mask_buf[i]);
+			if (ret) {
+				dev_err(map->dev, "Failed to set masks in 0x%x: %d\n",
+					reg, ret);
+				goto err_alloc;
 			}
 		}
 
-		if (chip->unmask_base) {
+		if (chip->unmask_base && !chip->handle_mask_sync) {
 			reg = d->get_irq_reg(d, chip->unmask_base, i);
 			ret = regmap_update_bits(d->map, reg,
 					d->mask_buf_def[i], ~d->mask_buf[i]);
